@@ -56,6 +56,7 @@ def run_split(
     page: int | None = None,
     max_ops: int = 5_000_000,
     timeout: float = 30.0,
+    grid: bool = False,
 ) -> SplitResult:
     """Detect icons in `src` and write one SVG per icon into `out_dir`."""
     import sys
@@ -88,6 +89,9 @@ def run_split(
                   file=sys.stderr)
     meta_list = interp.path_metadata if len(pages) == 1 else []
 
+    if grid:
+        meta_list = _filter_page_spanning(meta_list, bbox)
+
     mode: SplitMode
     clusters = _phase2_structural(meta_list, min_icons, max_icons)
     if clusters is not None:
@@ -95,6 +99,9 @@ def run_split(
     else:
         clusters = _phase3_geometric(meta_list)
         mode = "geometric"
+
+    if grid:
+        clusters = _lattice_merge(clusters)
 
     if not (min_icons <= len(clusters) <= max_icons):
         # Fallback: write the unsplit page SVG.
@@ -203,6 +210,52 @@ def _phase3_geometric(meta_list: list) -> list[list]:
     for i, m in enumerate(meta_list):
         buckets[find(i)].append(m)
     return list(buckets.values())
+
+
+# Pre-filter / lattice helpers (used by --grid mode)
+
+_PAGE_SPAN_FRACTION = 0.7          # Drop paths whose bbox covers ≥ this much of the page
+_LATTICE_MERGE_FRACTION = 0.7      # Merge clusters whose centres are within median_size × this
+
+def _filter_page_spanning(meta_list: list,
+                          page_bbox: tuple[float, float, float, float]) -> list:
+    """Drop paths whose individual bbox covers more than _PAGE_SPAN_FRACTION of
+    the page area. These are almost always background rectangles or borders, not
+    icons. The corresponding entries are removed; the rest are returned in order.
+    """
+    px0, py0, px1, py1 = page_bbox
+    page_area = max(1.0, (px1 - px0)) * max(1.0, (py1 - py0))
+    cutoff = _PAGE_SPAN_FRACTION * page_area
+    return [m for m in meta_list if _bbox_area(m.bbox) <= cutoff]
+
+
+def _lattice_merge(clusters: list[list]) -> list[list]:
+    """Snap initial clusters to a regular X × Y lattice and merge any clusters
+    that land in the same cell. Works well for uniform icon sheets where the
+    Phase 3 threshold is too tight and splits one icon into several clusters.
+
+    The lattice pitch is derived from the median cluster bbox (width × height).
+    A small threshold (median × _LATTICE_MERGE_FRACTION) collapses cluster
+    centres that fall inside the same icon cell. Returns the merged cluster
+    list, preserving cluster order within each cell.
+    """
+    if len(clusters) < 2:
+        return clusters
+    bboxes = [_shape_bbox(c) for c in clusters]
+    widths = sorted(b[2] - b[0] for b in bboxes if b[2] > b[0])
+    heights = sorted(b[3] - b[1] for b in bboxes if b[3] > b[1])
+    if not widths or not heights:
+        return clusters
+    med_w = widths[len(widths) // 2]
+    med_h = heights[len(heights) // 2]
+    cx = [(b[0] + b[2]) / 2 for b in bboxes]
+    cy = [(b[1] + b[3]) / 2 for b in bboxes]
+    col_idx = _cluster_1d(cx, med_w * _LATTICE_MERGE_FRACTION)
+    row_idx = _cluster_1d(cy, med_h * _LATTICE_MERGE_FRACTION)
+    merged: dict[tuple[int, int], list] = defaultdict(list)
+    for i, c in enumerate(clusters):
+        merged[(row_idx[i], col_idx[i])].extend(c)
+    return list(merged.values())
 
 
 def _cluster_1d(values: list[float], threshold: float) -> list[int]:

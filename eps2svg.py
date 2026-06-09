@@ -413,6 +413,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Output naming. Placeholders: {stem}, {index}, {row}, {col}")
     p.add_argument("--force", action="store_true",
                    help="Allow --split to write into a non-empty output directory")
+    p.add_argument("--grid", action="store_true",
+                   help="Lattice-aware --split: drop page-spanning paths and snap clusters "
+                        "to a regular grid (use when icons are uniformly sized and aligned)")
     p.add_argument("--timeout", type=float, default=30.0, metavar="SEC",
                    help="Wall-clock seconds before pure-Python conversion aborts "
                         "with a partial result (default: 30; 0 disables)")
@@ -573,6 +576,7 @@ def main(argv: list[str] | None = None) -> int:
                     page=args.page,
                     max_ops=args.max_ops,
                     timeout=args.timeout,
+                    grid=args.grid,
                 )
                 print(f"{src}  ->  {target_dir}/  "
                       f"[{result.mode}, {result.icon_count} icon(s)]")

@@ -304,6 +304,54 @@ class CliTests(unittest.TestCase):
             self.assertNotEqual(r.returncode, 0)
             self.assertIn("--split conflicts with -o/--output", r.stderr)
 
+    def test_cli_grid_mode_runs_without_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "icons"
+            r = subprocess.run(
+                ["eps2svg", str(FIXTURES / "grid_3x3.eps"),
+                 "--split", "--grid", "-d", str(out)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(len(list(out.glob("*.svg"))), 9)
+
+
+class GridModeTests(unittest.TestCase):
+    def test_grid_3x3_still_works_with_grid_flag(self):
+        """Grid mode must not regress strict grids."""
+        from eps2svg_split import run_split
+        with tempfile.TemporaryDirectory() as td:
+            result = run_split(FIXTURES / "grid_3x3.eps", Path(td), grid=True)
+            self.assertEqual(result.icon_count, 9)
+
+    def test_filter_page_spanning_drops_giant_rect(self):
+        from eps2svg_split import _filter_page_spanning
+        from eps2svg_pure import PathMeta
+        page = (0.0, 0.0, 100.0, 100.0)
+        metas = [
+            PathMeta(0, (0.0, 0.0, 100.0, 100.0), None),   # full page → drop
+            PathMeta(1, (10.0, 10.0, 30.0, 30.0), None),   # 4% of page → keep
+            PathMeta(2, (5.0, 5.0, 95.0, 95.0), None),     # 81% of page → drop
+        ]
+        kept = _filter_page_spanning(metas, page)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0].svg_index, 1)
+
+    def test_lattice_merge_collapses_co_cell_clusters(self):
+        from eps2svg_split import _lattice_merge
+        from eps2svg_pure import PathMeta
+        # Two clusters in the same logical cell + one in a clearly different cell.
+        clusters = [
+            [PathMeta(0, (10.0, 10.0, 40.0, 40.0), None)],
+            [PathMeta(1, (15.0, 15.0, 35.0, 35.0), None)],   # same cell
+            [PathMeta(2, (200.0, 200.0, 230.0, 230.0), None)],
+        ]
+        merged = _lattice_merge(clusters)
+        self.assertEqual(len(merged), 2)
+        # The two in the same cell should be merged
+        sizes = sorted(len(c) for c in merged)
+        self.assertEqual(sizes, [1, 2])
+
 
 class GettySmokeTests(unittest.TestCase):
     CORPUS = Path("C:/Users/pbonn/Downloads")
