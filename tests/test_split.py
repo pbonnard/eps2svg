@@ -141,6 +141,25 @@ class Phase4Tests(unittest.TestCase):
         self.assertEqual(rows, [0, 0, 0, 1, 1, 1, 2, 2, 2])
         self.assertEqual(cols, [0, 1, 2, 0, 1, 2, 0, 1, 2])
 
+    def test_top_row_of_two_row_grid_has_row_index_zero(self):
+        """PS Y-up convention can confuse 'top'. With three shapes at y=200
+        (top) and two at y=50 (bottom), the y=200 shapes must be row 0."""
+        from eps2svg_split import _assign_layout
+        from eps2svg_pure import PathMeta
+        # Three shapes at top (y center ~200), two at bottom (y center ~50)
+        clusters = [
+            [PathMeta(0, ( 40, 190,  60, 210), None)],   # top, left
+            [PathMeta(1, (140, 190, 160, 210), None)],   # top, middle
+            [PathMeta(2, (240, 190, 260, 210), None)],   # top, right
+            [PathMeta(3, ( 40,  40,  60,  60), None)],   # bottom, left
+            [PathMeta(4, (140,  40, 160,  60), None)],   # bottom, middle
+        ]
+        ordered = _assign_layout(clusters)
+        # First three in reading order are the top row (orig_idx 0, 1, 2)
+        # in column order. Without the Y-flip fix they would be 3, 4 first.
+        first_three_orig_idx = [t[2] for t in ordered[:3]]
+        self.assertEqual(first_three_orig_idx, [0, 1, 2])
+
 
 if __name__ == "__main__":
     unittest.main()

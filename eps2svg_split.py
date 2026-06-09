@@ -18,6 +18,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from eps2svg_pure import PathMeta
 
 
 SplitMode = Literal["structural", "geometric", "fallback"]
@@ -27,6 +31,7 @@ SplitMode = Literal["structural", "geometric", "fallback"]
 # docs/superpowers/specs/2026-06-09-icon-split-design.md and were chosen
 # empirically against the Getty icon corpus.
 _GEOMETRIC_GAP_FRACTION = 0.3   # Phase 3: cluster gap threshold = median diagonal × this
+_LAYOUT_GAP_FRACTION = 0.5      # Phase 4: row/col gap threshold = median width/height × this
 
 
 @dataclass
@@ -148,13 +153,13 @@ def _cluster_1d(values: list[float], threshold: float) -> list[int]:
     return cluster_idx
 
 
-def _shape_bbox(paths) -> tuple[float, float, float, float]:
+def _shape_bbox(paths: list["PathMeta"]) -> tuple[float, float, float, float]:
     xs0 = [p.bbox[0] for p in paths]; ys0 = [p.bbox[1] for p in paths]
     xs1 = [p.bbox[2] for p in paths]; ys1 = [p.bbox[3] for p in paths]
     return (min(xs0), min(ys0), max(xs1), max(ys1))
 
 
-def _assign_layout(shapes):
+def _assign_layout(shapes: list[list["PathMeta"]]):
     """Order shapes by (row, col) reading order using 1D gap clustering on
     centres. Returns a list of (row, col, index, shape) tuples sorted in
     reading order.
@@ -167,11 +172,17 @@ def _assign_layout(shapes):
     cy = [(b[1] + b[3]) / 2 for b in bboxes]
     widths = [b[2] - b[0] for b in bboxes]
     heights = [b[3] - b[1] for b in bboxes]
-    col_threshold = statistics.median(widths) * 0.5 if widths else 0.0
-    row_threshold = statistics.median(heights) * 0.5 if heights else 0.0
+    col_threshold = statistics.median(widths) * _LAYOUT_GAP_FRACTION if widths else 0.0
+    row_threshold = statistics.median(heights) * _LAYOUT_GAP_FRACTION if heights else 0.0
 
     col_idx = _cluster_1d(cx, col_threshold)
     row_idx = _cluster_1d(cy, row_threshold)
+    # PS Y-axis goes UP, so _cluster_1d puts the lowest cy (bottom of the
+    # page) at row 0. Flip the indices so the TOP of the page is row 0,
+    # which matches user expectations for icon reading order.
+    if row_idx:
+        n_rows = max(row_idx) + 1
+        row_idx = [n_rows - 1 - r for r in row_idx]
 
     enriched = list(zip(row_idx, col_idx, range(len(shapes)), shapes))
     enriched.sort(key=lambda t: (t[0], t[1]))
