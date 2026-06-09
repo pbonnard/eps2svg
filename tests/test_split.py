@@ -192,5 +192,21 @@ class RunSplitGeometricTests(unittest.TestCase):
                 ET.fromstring(p.read_text(encoding="utf-8"))
 
 
+class RunSplitStructuralTests(unittest.TestCase):
+    def test_gsave_grouped_uses_structural_mode_and_yields_four(self):
+        from eps2svg_split import run_split
+        with tempfile.TemporaryDirectory() as td:
+            result = run_split(FIXTURES / "gsave_grouped.eps", Path(td))
+        self.assertEqual(result.mode, "structural")
+        self.assertEqual(result.icon_count, 4)
+
+    def test_mixed_keeps_three_icons_and_absorbs_orphan(self):
+        from eps2svg_split import run_split
+        with tempfile.TemporaryDirectory() as td:
+            result = run_split(FIXTURES / "mixed.eps", Path(td))
+        self.assertEqual(result.mode, "structural")
+        self.assertEqual(result.icon_count, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

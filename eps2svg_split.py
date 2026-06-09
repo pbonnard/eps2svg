@@ -86,8 +86,13 @@ def run_split(
                   file=sys.stderr)
     meta_list = interp.path_metadata if len(pages) == 1 else []
 
-    # Phase 3 (geometric) only - Phase 2 added in the next task.
-    clusters = _phase3_geometric(meta_list)
+    mode: SplitMode
+    clusters = _phase2_structural(meta_list, min_icons, max_icons)
+    if clusters is not None:
+        mode = "structural"
+    else:
+        clusters = _phase3_geometric(meta_list)
+        mode = "geometric"
 
     if not (min_icons <= len(clusters) <= max_icons):
         # Fallback: write the unsplit page SVG.
@@ -123,7 +128,7 @@ def run_split(
         dst.write_text(svg_text, encoding="utf-8")
         written.append(dst)
 
-    return SplitResult(mode="geometric", icon_count=len(written), written=written)
+    return SplitResult(mode=mode, icon_count=len(written), written=written)
 
 
 def _bbox_gap(a: tuple[float, float, float, float],
@@ -283,6 +288,70 @@ def _emit_icon_svg(path_fragments: list[str],
     parts.append("</g>")
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+def _bbox_area(b: tuple[float, float, float, float]) -> float:
+    return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+
+
+def _bbox_iou(a, b) -> float:
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+    union = _bbox_area(a) + _bbox_area(b) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _phase2_structural(meta_list, min_icons: int, max_icons: int):
+    """Return a list of clusters (each a list of PathMeta) if structural
+    grouping is accepted; otherwise None."""
+    grouped: dict[int, list] = defaultdict(list)
+    for m in meta_list:
+        if m.group_id is not None:
+            grouped[m.group_id].append(m)
+    if not grouped:
+        return None
+    groups = list(grouped.values())
+    n = len(groups)
+    if not (min_icons <= n <= max_icons):
+        return None
+
+    # Step 2b: IoU check (avg pairwise)
+    bboxes = [_shape_bbox(g) for g in groups]
+    if n > 1:
+        total = 0.0; pairs = 0
+        for i in range(n):
+            for j in range(i + 1, n):
+                total += _bbox_iou(bboxes[i], bboxes[j])
+                pairs += 1
+        if (total / pairs) >= 0.05:
+            return None
+
+    # Coverage check: area of grouped path bboxes / area of all path bboxes
+    grouped_area = sum(_bbox_area(m.bbox) for m in meta_list
+                       if m.group_id is not None)
+    total_area = sum(_bbox_area(m.bbox) for m in meta_list)
+    if total_area > 0 and (grouped_area / total_area) < 0.6:
+        return None
+
+    # Step 2c: merge orphans (group_id is None) into nearest group by centre
+    orphans = [m for m in meta_list if m.group_id is None]
+    for m in orphans:
+        ox = (m.bbox[0] + m.bbox[2]) / 2
+        oy = (m.bbox[1] + m.bbox[3]) / 2
+        best_idx = 0
+        best_d = float("inf")
+        for i, gb in enumerate(bboxes):
+            gx = (gb[0] + gb[2]) / 2
+            gy = (gb[1] + gb[3]) / 2
+            d = (gx - ox) ** 2 + (gy - oy) ** 2
+            if d < best_d:
+                best_d = d; best_idx = i
+        groups[best_idx].append(m)
+
+    return groups
 
 
 def _capture_pages(src: Path, *, max_ops: int, timeout: float, verbose: bool):
