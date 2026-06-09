@@ -237,9 +237,34 @@ class IrregularGridTests(unittest.TestCase):
         from eps2svg_split import run_split
         with tempfile.TemporaryDirectory() as td:
             result = run_split(FIXTURES / "grid_irregular.eps", Path(td))
-            # Should produce 6 icons via geometric mode (no gsave structure)
             self.assertEqual(result.mode, "geometric")
             self.assertEqual(result.icon_count, 6)
+            # Reading order should produce two rows of three columns each:
+            # 001..003 = top row (PS y=180), 004..006 = bottom row (PS y=50).
+            # Filenames are written in reading order, so sorted names follow
+            # the row-then-column convention.
+            names = sorted(p.name for p in result.written)
+            self.assertEqual(names, [
+                "grid_irregular-001.svg",
+                "grid_irregular-002.svg",
+                "grid_irregular-003.svg",
+                "grid_irregular-004.svg",
+                "grid_irregular-005.svg",
+                "grid_irregular-006.svg",
+            ])
+            # Additionally, verify the underlying layout indices come out
+            # as a 2x3 grid (rows={0,0,0,1,1,1}, cols={0,1,2,0,1,2}) by
+            # rerunning the layout step on the captured metadata.
+            from eps2svg_split import _capture_pages, _phase3_geometric, _assign_layout
+            interp, _ = _capture_pages(
+                FIXTURES / "grid_irregular.eps",
+                max_ops=5_000_000, timeout=30.0, verbose=False,
+            )
+            ordered = _assign_layout(_phase3_geometric(interp.path_metadata))
+            rows = [t[0] for t in ordered]
+            cols = [t[1] for t in ordered]
+            self.assertEqual(rows, [0, 0, 0, 1, 1, 1])
+            self.assertEqual(cols, [0, 1, 2, 0, 1, 2])
 
 
 if __name__ == "__main__":
