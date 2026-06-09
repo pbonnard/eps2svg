@@ -26,4 +26,4 @@ cairosvg = ["cairosvg>=2.7"]
 eps2svg = "eps2svg:main"
 
 [tool.setuptools]
-py-modules = ["eps2svg", "eps2svg_pure"]
+py-modules = ["eps2svg", "eps2svg_pure", "eps2svg_split"]

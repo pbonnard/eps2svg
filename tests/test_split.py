@@ -54,5 +54,18 @@ class GroupIdTests(unittest.TestCase):
         self.assertNotIn(None, gids)
 
 
+class SplitModuleSurfaceTests(unittest.TestCase):
+    def test_exports_split_result_and_run_split(self):
+        import eps2svg_split
+        self.assertTrue(hasattr(eps2svg_split, "SplitResult"))
+        self.assertTrue(hasattr(eps2svg_split, "run_split"))
+
+    def test_run_split_stub_raises_not_implemented(self):
+        import eps2svg_split
+        from pathlib import Path
+        with self.assertRaises(NotImplementedError):
+            eps2svg_split.run_split(Path("nope.eps"), Path("/tmp/out"))
+
+
 if __name__ == "__main__":
     unittest.main()
