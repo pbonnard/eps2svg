@@ -32,6 +32,8 @@ SplitMode = Literal["structural", "geometric", "fallback"]
 # empirically against the Getty icon corpus.
 _GEOMETRIC_GAP_FRACTION = 0.3   # Phase 3: cluster gap threshold = median diagonal × this
 _LAYOUT_GAP_FRACTION = 0.5      # Phase 4: row/col gap threshold = median width/height × this
+_STRUCTURAL_IOU_THRESHOLD = 0.05      # Phase 2: reject if avg pairwise group IoU ≥ this
+_STRUCTURAL_COVERAGE_THRESHOLD = 0.6  # Phase 2: reject if grouped area / total area < this
 
 
 @dataclass
@@ -294,7 +296,8 @@ def _bbox_area(b: tuple[float, float, float, float]) -> float:
     return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
 
 
-def _bbox_iou(a, b) -> float:
+def _bbox_iou(a: tuple[float, float, float, float],
+              b: tuple[float, float, float, float]) -> float:
     ax0, ay0, ax1, ay1 = a
     bx0, by0, bx1, by1 = b
     ix0, iy0 = max(ax0, bx0), max(ay0, by0)
@@ -304,7 +307,9 @@ def _bbox_iou(a, b) -> float:
     return inter / union if union > 0 else 0.0
 
 
-def _phase2_structural(meta_list, min_icons: int, max_icons: int):
+def _phase2_structural(meta_list: list,
+                       min_icons: int,
+                       max_icons: int) -> list[list] | None:
     """Return a list of clusters (each a list of PathMeta) if structural
     grouping is accepted; otherwise None."""
     grouped: dict[int, list] = defaultdict(list)
@@ -326,14 +331,14 @@ def _phase2_structural(meta_list, min_icons: int, max_icons: int):
             for j in range(i + 1, n):
                 total += _bbox_iou(bboxes[i], bboxes[j])
                 pairs += 1
-        if (total / pairs) >= 0.05:
+        if (total / pairs) >= _STRUCTURAL_IOU_THRESHOLD:
             return None
 
     # Coverage check: area of grouped path bboxes / area of all path bboxes
     grouped_area = sum(_bbox_area(m.bbox) for m in meta_list
                        if m.group_id is not None)
     total_area = sum(_bbox_area(m.bbox) for m in meta_list)
-    if total_area > 0 and (grouped_area / total_area) < 0.6:
+    if total_area > 0 and (grouped_area / total_area) < _STRUCTURAL_COVERAGE_THRESHOLD:
         return None
 
     # Step 2c: merge orphans (group_id is None) into nearest group by centre
