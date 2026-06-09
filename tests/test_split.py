@@ -67,5 +67,23 @@ class SplitModuleSurfaceTests(unittest.TestCase):
             eps2svg_split.run_split(Path("nope.eps"), Path("/tmp/out"))
 
 
+class Phase3Tests(unittest.TestCase):
+    def _capture(self, fixture: str, bbox=(0, 0, 300, 300)):
+        from eps2svg_pure import Interpreter, tokenize, _ADOBE_PROLOG
+        src = (FIXTURES / fixture).read_text(encoding="latin-1")
+        interp = Interpreter(bbox)
+        interp._exec_tokens(tokenize(_ADOBE_PROLOG))
+        interp._exec_tokens(tokenize(src))
+        return interp.path_metadata
+
+    def test_grid_3x3_geometric_yields_nine_clusters(self):
+        from eps2svg_split import _phase3_geometric
+        meta = self._capture("grid_3x3.eps")
+        clusters = _phase3_geometric(meta)
+        self.assertEqual(len(clusters), 9)
+        for c in clusters:
+            self.assertEqual(len(c), 1)   # each circle is its own cluster
+
+
 if __name__ == "__main__":
     unittest.main()
