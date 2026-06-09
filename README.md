@@ -81,6 +81,28 @@ eps2svg report.ps --page 3              # page 3
 
 Pre-flight check catches out-of-range page numbers with a clear error.
 
+## Icon splitting
+
+Icon-sheet EPS/PS files (e.g. "Finance Icons set", "Programming icons") can be
+split into one SVG per icon with `--split`:
+
+```bash
+eps2svg sheet.ps --split -d icons/
+```
+
+The algorithm is hybrid:
+
+1. **Structural** — if the source wraps each icon in `gsave ... grestore`, those
+   blocks are the icons.
+2. **Geometric** (fallback) — single-link cluster paths by bbox proximity; cluster
+   the cluster centres into rows and columns.
+
+If neither phase yields between `--min-icons` and `--max-icons` shapes, the file
+is treated as a single illustration and written unsplit into the output directory.
+
+`--split` only works with the pure-Python backend; pairing it with
+`--backend inkscape` or `--backend ghostscript` is an error.
+
 ### Options
 
 | Flag | Default | Description |
@@ -96,6 +118,12 @@ Pre-flight check catches out-of-range page numbers with a clear error.
 | `--backend NAME` | auto | Force backend prefix: `pure`, `inkscape`, or `ghostscript` |
 | `-v` / `--verbose` | — | Show backend commands and diagnostics |
 | `--diagnose` | — | Show which backends are available and exit |
+| `--split` | — | Split into one SVG per detected icon (pure-Python backend only). See "Icon splitting" below. |
+| `--pad PT` | `2` | Padding around each icon's viewBox in `--split` mode |
+| `--min-icons N` | `2` | Below this, `--split` falls back to a single unsplit SVG |
+| `--max-icons N` | `500` | Above this, `--split` falls back |
+| `--name-pattern PATTERN` | `{stem}-{index:03d}.svg` | Output naming for `--split`; placeholders `{stem}`, `{index}`, `{row}`, `{col}` |
+| `--force` | — | Allow `--split` to write into a non-empty output dir |
 
 ### Examples
 
