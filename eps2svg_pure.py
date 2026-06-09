@@ -26,13 +26,24 @@ from typing import Any, Callable
 class PathMeta:
     """Per-path metadata captured at emit time for the split feature.
 
+    The list `Interpreter.path_metadata` is a flat list across all pages of
+    the document. Not every entry in `Interpreter.pages[i]` has a
+    corresponding `PathMeta` — only painted paths (op_fill / op_eofill /
+    op_stroke) are recorded; explicit SVG fragments such as embedded image
+    elements are not. Consumers that need a per-page view should bucket
+    these records themselves; the split feature only operates on documents
+    with a single page.
+
     Fields:
-      svg_index — index into the current page's svg-fragment list.
+      svg_index — index into the current page's svg-fragment list at the
+                  time this PathMeta was appended. Only meaningful for
+                  single-page documents.
       bbox      — (x0, y0, x1, y1) in PostScript device coordinates,
-                  after the CTM has been applied to all path points.
+                  after the CTM has been applied to all path points
+                  (including cubic Bezier control points).
       group_id  — the structural group this path belongs to (see
-                  Interpreter._update_group_id_on_gsave_grestore). None
-                  for paths emitted while gsave-depth is 0.
+                  Interpreter.op_gsave / op_grestore). None for paths
+                  emitted while gsave-depth is 0.
     """
     svg_index: int
     bbox: tuple[float, float, float, float]
@@ -960,7 +971,7 @@ class Interpreter:
                     out.append("Z")
         return " ".join(out)
 
-    def _path_to_svg_d_with_bbox(self):
+    def _path_to_svg_d_with_bbox(self) -> tuple[str, tuple[float, float, float, float] | None]:
         """Like _path_to_svg_d but also returns the device-coord bbox.
         Returns (d_string, bbox) where bbox is (x0, y0, x1, y1) or None
         if the path is empty."""
@@ -995,6 +1006,7 @@ class Interpreter:
     def op_stroke(self):
         d, bbox = self._path_to_svg_d_with_bbox()
         if d:
+            # Effective stroke width: PS line width × CTM scale (avg of |a| and |d|)
             a, b, c, dd = self.gstate.ctm[:4]
             sx = math.hypot(a, b)
             sy = math.hypot(c, dd)
