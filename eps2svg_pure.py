@@ -17,8 +17,26 @@ import base64
 import math
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+
+@dataclass
+class PathMeta:
+    """Per-path metadata captured at emit time for the split feature.
+
+    Fields:
+      svg_index — index into the current page's svg-fragment list.
+      bbox      — (x0, y0, x1, y1) in PostScript device coordinates,
+                  after the CTM has been applied to all path points.
+      group_id  — the structural group this path belongs to (see
+                  Interpreter._update_group_id_on_gsave_grestore). None
+                  for paths emitted while gsave-depth is 0.
+    """
+    svg_index: int
+    bbox: tuple[float, float, float, float]
+    group_id: int | None
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +413,12 @@ class Interpreter:
         # Output SVG drawing elements, grouped per page.
         # pages[i] is the list of SVG fragments emitted for page (i+1).
         self.pages: list[list[str]] = [[]]
+
+        # Per-path metadata captured at emit time for the split feature.
+        # Parallels self.pages[-1] entries that are painting ops (fill/stroke).
+        self.path_metadata: list[PathMeta] = []
+        self._next_group_id: int = 0
+        self.current_group_id: int | None = None
 
         # PageSize seen via setpagedevice (if any) — updates bbox if no
         # %%BoundingBox was provided.
@@ -936,14 +960,41 @@ class Interpreter:
                     out.append("Z")
         return " ".join(out)
 
+    def _path_to_svg_d_with_bbox(self):
+        """Like _path_to_svg_d but also returns the device-coord bbox.
+        Returns (d_string, bbox) where bbox is (x0, y0, x1, y1) or None
+        if the path is empty."""
+        out = []
+        xs: list[float] = []
+        ys: list[float] = []
+        for sub in self.path:
+            for seg in sub:
+                if seg[0] == "M":
+                    x, y = self._apply_ctm(seg[1], seg[2])
+                    xs.append(x); ys.append(y)
+                    out.append(f"M{x:.3f} {y:.3f}")
+                elif seg[0] == "L":
+                    x, y = self._apply_ctm(seg[1], seg[2])
+                    xs.append(x); ys.append(y)
+                    out.append(f"L{x:.3f} {y:.3f}")
+                elif seg[0] == "C":
+                    x1, y1 = self._apply_ctm(seg[1], seg[2])
+                    x2, y2 = self._apply_ctm(seg[3], seg[4])
+                    x3, y3 = self._apply_ctm(seg[5], seg[6])
+                    xs.extend([x1, x2, x3]); ys.extend([y1, y2, y3])
+                    out.append(f"C{x1:.3f} {y1:.3f} {x2:.3f} {y2:.3f} {x3:.3f} {y3:.3f}")
+                elif seg[0] == "Z":
+                    out.append("Z")
+        bbox = (min(xs), min(ys), max(xs), max(ys)) if xs else None
+        return " ".join(out), bbox
+
     def _color_hex(self, rgb) -> str:
         r, g, b = rgb
         return "#{:02x}{:02x}{:02x}".format(int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5))
 
     def op_stroke(self):
-        d = self._path_to_svg_d()
+        d, bbox = self._path_to_svg_d_with_bbox()
         if d:
-            # Effective stroke width: PS line width × CTM scale (avg of |a| and |d|)
             a, b, c, dd = self.gstate.ctm[:4]
             sx = math.hypot(a, b)
             sy = math.hypot(c, dd)
@@ -961,24 +1012,42 @@ class Interpreter:
             if self.gstate.dash_array:
                 attrs.append(f'stroke-dasharray="{",".join(f"{x:.3f}" for x in self.gstate.dash_array)}"')
             self.pages[-1].append("<path " + " ".join(attrs) + "/>")
+            if bbox is not None:
+                self.path_metadata.append(PathMeta(
+                    svg_index=len(self.pages[-1]) - 1,
+                    bbox=bbox,
+                    group_id=self.current_group_id,
+                ))
         self.op_newpath()
 
     def op_fill(self):
-        d = self._path_to_svg_d()
+        d, bbox = self._path_to_svg_d_with_bbox()
         if d:
             self.pages[-1].append(
                 f'<path d="{d}" fill="{self._color_hex(self.gstate.fill_color)}" '
                 f'fill-rule="nonzero" stroke="none"/>'
             )
+            if bbox is not None:
+                self.path_metadata.append(PathMeta(
+                    svg_index=len(self.pages[-1]) - 1,
+                    bbox=bbox,
+                    group_id=self.current_group_id,
+                ))
         self.op_newpath()
 
     def op_eofill(self):
-        d = self._path_to_svg_d()
+        d, bbox = self._path_to_svg_d_with_bbox()
         if d:
             self.pages[-1].append(
                 f'<path d="{d}" fill="{self._color_hex(self.gstate.fill_color)}" '
                 f'fill-rule="evenodd" stroke="none"/>'
             )
+            if bbox is not None:
+                self.path_metadata.append(PathMeta(
+                    svg_index=len(self.pages[-1]) - 1,
+                    bbox=bbox,
+                    group_id=self.current_group_id,
+                ))
         self.op_newpath()
 
     def op_rectfill(self):
