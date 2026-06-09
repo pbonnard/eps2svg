@@ -120,5 +120,27 @@ class Phase3Tests(unittest.TestCase):
         self.assertEqual(len(clusters), 2)
 
 
+class Phase4Tests(unittest.TestCase):
+    def _capture(self, fixture, bbox=(0, 0, 300, 300)):
+        from eps2svg_pure import Interpreter, tokenize, _ADOBE_PROLOG
+        src = (FIXTURES / fixture).read_text(encoding="latin-1")
+        interp = Interpreter(bbox)
+        interp._exec_tokens(tokenize(_ADOBE_PROLOG))
+        interp._exec_tokens(tokenize(src))
+        return interp.path_metadata
+
+    def test_grid_3x3_reading_order_is_left_to_right_top_to_bottom(self):
+        from eps2svg_split import _phase3_geometric, _assign_layout
+        meta = self._capture("grid_3x3.eps")
+        clusters = _phase3_geometric(meta)
+        ordered = _assign_layout(clusters)
+        # Expect 3 rows of 3 columns; row indices 0,0,0,1,1,1,2,2,2;
+        # col indices 0,1,2,0,1,2,0,1,2
+        rows = [t[0] for t in ordered]
+        cols = [t[1] for t in ordered]
+        self.assertEqual(rows, [0, 0, 0, 1, 1, 1, 2, 2, 2])
+        self.assertEqual(cols, [0, 1, 2, 0, 1, 2, 0, 1, 2])
+
+
 if __name__ == "__main__":
     unittest.main()

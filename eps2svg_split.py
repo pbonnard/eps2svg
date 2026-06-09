@@ -124,3 +124,55 @@ def _phase3_geometric(meta_list: list) -> list[list]:
     for i, m in enumerate(meta_list):
         buckets[find(i)].append(m)
     return list(buckets.values())
+
+
+def _cluster_1d(values: list[float], threshold: float) -> list[int]:
+    """Assign each value to a cluster index by gap-threshold clustering.
+    Values are processed in sorted order; consecutive values whose gap is
+    ≤ threshold share a cluster.
+
+    Returns a list of cluster indices, parallel to `values`."""
+    if not values:
+        return []
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    cluster_idx = [0] * len(values)
+    current = 0
+    prev = values[order[0]]
+    cluster_idx[order[0]] = current
+    for k in range(1, len(order)):
+        v = values[order[k]]
+        if v - prev > threshold:
+            current += 1
+        cluster_idx[order[k]] = current
+        prev = v
+    return cluster_idx
+
+
+def _shape_bbox(paths) -> tuple[float, float, float, float]:
+    xs0 = [p.bbox[0] for p in paths]; ys0 = [p.bbox[1] for p in paths]
+    xs1 = [p.bbox[2] for p in paths]; ys1 = [p.bbox[3] for p in paths]
+    return (min(xs0), min(ys0), max(xs1), max(ys1))
+
+
+def _assign_layout(shapes):
+    """Order shapes by (row, col) reading order using 1D gap clustering on
+    centres. Returns a list of (row, col, index, shape) tuples sorted in
+    reading order.
+
+    `shapes` is a list of lists of PathMeta (the output of Phase 2 or 3)."""
+    if not shapes:
+        return []
+    bboxes = [_shape_bbox(s) for s in shapes]
+    cx = [(b[0] + b[2]) / 2 for b in bboxes]
+    cy = [(b[1] + b[3]) / 2 for b in bboxes]
+    widths = [b[2] - b[0] for b in bboxes]
+    heights = [b[3] - b[1] for b in bboxes]
+    col_threshold = statistics.median(widths) * 0.5 if widths else 0.0
+    row_threshold = statistics.median(heights) * 0.5 if heights else 0.0
+
+    col_idx = _cluster_1d(cx, col_threshold)
+    row_idx = _cluster_1d(cy, row_threshold)
+
+    enriched = list(zip(row_idx, col_idx, range(len(shapes)), shapes))
+    enriched.sort(key=lambda t: (t[0], t[1]))
+    return enriched
