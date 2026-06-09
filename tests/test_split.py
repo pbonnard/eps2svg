@@ -208,5 +208,39 @@ class RunSplitStructuralTests(unittest.TestCase):
         self.assertEqual(result.icon_count, 3)
 
 
+class FallbackTests(unittest.TestCase):
+    def test_single_shape_falls_back_to_unsplit_svg(self):
+        from eps2svg_split import run_split
+        with tempfile.TemporaryDirectory() as td:
+            result = run_split(FIXTURES / "single_shape.eps", Path(td))
+            self.assertEqual(result.mode, "fallback")
+            self.assertEqual(result.icon_count, 1)
+            self.assertTrue(result.written[0].name == "single_shape.svg")
+
+    def test_existing_non_empty_dir_without_force_raises(self):
+        from eps2svg_split import run_split
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "stale.svg").write_text("x")
+            with self.assertRaises(FileExistsError):
+                run_split(FIXTURES / "grid_3x3.eps", Path(td))
+
+    def test_force_overwrites_non_empty_dir(self):
+        from eps2svg_split import run_split
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "stale.svg").write_text("x")
+            result = run_split(FIXTURES / "grid_3x3.eps", Path(td), force=True)
+            self.assertEqual(result.icon_count, 9)
+
+
+class IrregularGridTests(unittest.TestCase):
+    def test_irregular_grid_yields_six_icons_in_two_rows(self):
+        from eps2svg_split import run_split
+        with tempfile.TemporaryDirectory() as td:
+            result = run_split(FIXTURES / "grid_irregular.eps", Path(td))
+            # Should produce 6 icons via geometric mode (no gsave structure)
+            self.assertEqual(result.mode, "geometric")
+            self.assertEqual(result.icon_count, 6)
+
+
 if __name__ == "__main__":
     unittest.main()
