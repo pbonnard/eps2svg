@@ -13,12 +13,20 @@ Entry point: run_split(src, out_dir, ...).
 
 from __future__ import annotations
 
+import statistics
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 
 SplitMode = Literal["structural", "geometric", "fallback"]
+
+
+# Tuning knobs for the geometric and layout phases. These match
+# docs/superpowers/specs/2026-06-09-icon-split-design.md and were chosen
+# empirically against the Getty icon corpus.
+_GEOMETRIC_GAP_FRACTION = 0.3   # Phase 3: cluster gap threshold = median diagonal × this
 
 
 @dataclass
@@ -46,10 +54,6 @@ def run_split(
     raise NotImplementedError("Filled in by later tasks.")
 
 
-import statistics
-from collections import defaultdict
-
-
 def _bbox_gap(a: tuple[float, float, float, float],
               b: tuple[float, float, float, float]) -> float:
     """Minimum axis-aligned distance between two bboxes. 0 if they overlap."""
@@ -60,9 +64,14 @@ def _bbox_gap(a: tuple[float, float, float, float],
     return (dx * dx + dy * dy) ** 0.5
 
 
-def _phase3_geometric(meta_list):
+def _phase3_geometric(meta_list: list) -> list[list]:
     """Single-link cluster paths by bbox gap. Returns a list of clusters,
-    each cluster being a list of PathMeta records."""
+    each cluster being a list of `PathMeta` records.
+
+    Note: parameter typed as `list` (not `list[PathMeta]`) to avoid a circular
+    import with `eps2svg_pure`. The function reads only `m.bbox` on each
+    element, so any tuple-bbox-bearing object will work.
+    """
     if not meta_list:
         return []
 
@@ -71,9 +80,11 @@ def _phase3_geometric(meta_list):
     for m in meta_list:
         x0, y0, x1, y1 = m.bbox
         diagonals.append(((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5)
-    threshold = statistics.median(diagonals) * 0.3 if diagonals else 0.0
+    threshold = statistics.median(diagonals) * _GEOMETRIC_GAP_FRACTION if diagonals else 0.0
 
     # Union-find over path indices
+    # Union-find with path compression only — no rank/size. Adequate for
+    # the few-thousand-paths regime; α(n) amortised per find.
     parent = list(range(len(meta_list)))
 
     def find(i: int) -> int:
@@ -97,6 +108,10 @@ def _phase3_geometric(meta_list):
         cutoff = cx - 2 * threshold - max(
             meta_list[idx].bbox[2] - meta_list[idx].bbox[0], 1.0
         )
+        # Conservative cutoff: assumes window-entry widths are roughly
+        # comparable to the current path. Safe for icon sheets where
+        # bbox sizes cluster. `max(width, 1.0)` floors zero-width bboxes
+        # so the cutoff still advances on degenerate paths.
         window = [w for w in window
                   if (meta_list[w].bbox[0] + meta_list[w].bbox[2]) / 2 > cutoff]
         for w in window:

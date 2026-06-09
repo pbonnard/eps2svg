@@ -84,6 +84,41 @@ class Phase3Tests(unittest.TestCase):
         for c in clusters:
             self.assertEqual(len(c), 1)   # each circle is its own cluster
 
+    def test_empty_input_returns_empty(self):
+        from eps2svg_split import _phase3_geometric
+        self.assertEqual(_phase3_geometric([]), [])
+
+    def test_single_path_returns_one_singleton_cluster(self):
+        from eps2svg_split import _phase3_geometric
+        from eps2svg_pure import PathMeta
+        clusters = _phase3_geometric([PathMeta(0, (0, 0, 10, 10), None)])
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(len(clusters[0]), 1)
+
+    def test_overlapping_bboxes_merge_into_one_cluster(self):
+        from eps2svg_split import _phase3_geometric
+        from eps2svg_pure import PathMeta
+        # Two heavily overlapping bboxes → gap is 0 → merged
+        metas = [
+            PathMeta(0, (0, 0, 10, 10), None),
+            PathMeta(1, (3, 3, 13, 13), None),
+        ]
+        clusters = _phase3_geometric(metas)
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(len(clusters[0]), 2)
+
+    def test_gap_just_above_threshold_keeps_clusters_separate(self):
+        from eps2svg_split import _phase3_geometric
+        from eps2svg_pure import PathMeta
+        # Two identical 10×10 bboxes far apart → median diagonal = √200 ≈ 14.14
+        # Threshold = 14.14 × 0.3 ≈ 4.24. Gap of 5 should keep them separate.
+        metas = [
+            PathMeta(0, (0, 0, 10, 10), None),
+            PathMeta(1, (15, 0, 25, 10), None),   # x-gap = 5
+        ]
+        clusters = _phase3_geometric(metas)
+        self.assertEqual(len(clusters), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
