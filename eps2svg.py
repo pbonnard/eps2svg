@@ -400,6 +400,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Recurse into subdirectories when input is a directory or **/*.eps glob")
     p.add_argument("--page", type=int, metavar="N",
                    help="For multi-page PS files: render page N (1-based). Default: 1.")
+    p.add_argument("--split", action="store_true",
+                   help="Split into one SVG per detected icon. Requires pure-Python backend.")
+    p.add_argument("--pad", type=float, default=2.0, metavar="PT",
+                   help="Padding (points) around each icon's viewBox in --split mode (default: 2)")
+    p.add_argument("--min-icons", dest="min_icons", type=int, default=2, metavar="N",
+                   help="Refuse to split if fewer icons detected (default: 2)")
+    p.add_argument("--max-icons", dest="max_icons", type=int, default=500, metavar="N",
+                   help="Refuse to split if more icons detected (default: 500)")
+    p.add_argument("--name-pattern", dest="name_pattern",
+                   default="{stem}-{index:03d}.svg", metavar="PATTERN",
+                   help="Output naming. Placeholders: {stem}, {index}, {row}, {col}")
+    p.add_argument("--force", action="store_true",
+                   help="Allow --split to write into a non-empty output directory")
     p.add_argument("--timeout", type=float, default=30.0, metavar="SEC",
                    help="Wall-clock seconds before pure-Python conversion aborts "
                         "with a partial result (default: 30; 0 disables)")
@@ -504,6 +517,11 @@ def main(argv: list[str] | None = None) -> int:
                      f"(got {len(inputs)} after expansion).")
     if args.output and args.output_dir:
         parser.error("--output and --output-dir are mutually exclusive.")
+    if args.split:
+        if args.output:
+            parser.error("--split conflicts with -o/--output; use -d DIR.")
+        if args.backend and not args.backend.lower().startswith("pure"):
+            parser.error("--split requires --backend pure (the default).")
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -540,18 +558,37 @@ def main(argv: list[str] | None = None) -> int:
                 pass  # best-effort; fall through to backend
 
         try:
-            used = convert(
-                src, dst,
-                dpi=args.dpi,
-                strip_bg=args.strip_bg,
-                verbose=args.verbose,
-                backend=args.backend,
-                page=args.page,
-                max_ops=args.max_ops,
-                timeout=args.timeout,
-            )
-            size_kb = dst.stat().st_size / 1024
-            print(f"{src}  ->  {dst}  [{used}, {size_kb:.1f} KB]")
+            if args.split:
+                from eps2svg_split import run_split
+                target_dir = (Path(args.output_dir) if args.output_dir
+                              else src.with_suffix("").parent / f"{src.stem}-icons")
+                result = run_split(
+                    src, target_dir,
+                    pad=args.pad,
+                    min_icons=args.min_icons,
+                    max_icons=args.max_icons,
+                    name_pattern=args.name_pattern,
+                    force=args.force,
+                    verbose=args.verbose,
+                    page=args.page,
+                    max_ops=args.max_ops,
+                    timeout=args.timeout,
+                )
+                print(f"{src}  ->  {target_dir}/  "
+                      f"[{result.mode}, {result.icon_count} icon(s)]")
+            else:
+                used = convert(
+                    src, dst,
+                    dpi=args.dpi,
+                    strip_bg=args.strip_bg,
+                    verbose=args.verbose,
+                    backend=args.backend,
+                    page=args.page,
+                    max_ops=args.max_ops,
+                    timeout=args.timeout,
+                )
+                size_kb = dst.stat().st_size / 1024
+                print(f"{src}  ->  {dst}  [{used}, {size_kb:.1f} KB]")
         except Exception as e:
             print(f"error: {src}: {e}", file=sys.stderr)
             errors += 1

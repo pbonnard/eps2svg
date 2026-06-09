@@ -267,5 +267,43 @@ class IrregularGridTests(unittest.TestCase):
             self.assertEqual(cols, [0, 1, 2, 0, 1, 2])
 
 
+import subprocess
+
+
+class CliTests(unittest.TestCase):
+    def test_cli_split_produces_nine_svgs(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "icons"
+            r = subprocess.run(
+                ["eps2svg", str(FIXTURES / "grid_3x3.eps"),
+                 "--split", "-d", str(out)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            files = sorted(out.glob("*.svg"))
+            self.assertEqual(len(files), 9)
+            self.assertEqual(files[0].name, "grid_3x3-001.svg")
+
+    def test_cli_split_with_explicit_external_backend_errors(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = subprocess.run(
+                ["eps2svg", str(FIXTURES / "grid_3x3.eps"),
+                 "--split", "--backend", "inkscape", "-d", td],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("--split requires --backend pure", r.stderr)
+
+    def test_cli_split_with_output_file_errors(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = subprocess.run(
+                ["eps2svg", str(FIXTURES / "grid_3x3.eps"),
+                 "--split", "-o", str(Path(td) / "x.svg")],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("--split conflicts with -o/--output", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
