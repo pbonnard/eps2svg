@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eps2svg"
+version = "1.0.0"
+description = "Convert EPS files to SVG preserving vector quality and background transparency"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["eps", "svg", "vector", "convert", "inkscape", "ghostscript"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+cairosvg = ["cairosvg>=2.7"]
+
+[project.scripts]
+eps2svg = "eps2svg:main"
+
+[tool.setuptools]
+py-modules = ["eps2svg", "eps2svg_pure"]

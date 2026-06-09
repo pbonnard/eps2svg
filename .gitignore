@@ -1,0 +1,17 @@
+# Python build artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Test output and converted artefacts
+*.svg
+!test/*.svg
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
