@@ -60,12 +60,6 @@ class SplitModuleSurfaceTests(unittest.TestCase):
         self.assertTrue(hasattr(eps2svg_split, "SplitResult"))
         self.assertTrue(hasattr(eps2svg_split, "run_split"))
 
-    def test_run_split_stub_raises_not_implemented(self):
-        import eps2svg_split
-        from pathlib import Path
-        with self.assertRaises(NotImplementedError):
-            eps2svg_split.run_split(Path("nope.eps"), Path("/tmp/out"))
-
 
 class Phase3Tests(unittest.TestCase):
     def _capture(self, fixture: str, bbox=(0, 0, 300, 300)):
@@ -175,6 +169,27 @@ class Phase5Tests(unittest.TestCase):
         # Sanity: it should be parseable XML
         import xml.etree.ElementTree as ET
         ET.fromstring(svg)
+
+
+import tempfile
+
+
+class RunSplitGeometricTests(unittest.TestCase):
+    def test_grid_3x3_writes_nine_svgs(self):
+        from eps2svg_split import run_split
+        with tempfile.TemporaryDirectory() as td:
+            result = run_split(FIXTURES / "grid_3x3.eps", Path(td))
+            self.assertEqual(result.mode, "geometric")
+            self.assertEqual(result.icon_count, 9)
+            self.assertEqual(len(result.written), 9)
+            # Filenames numbered 001..009
+            names = sorted(p.name for p in result.written)
+            self.assertEqual(names[0], "grid_3x3-001.svg")
+            self.assertEqual(names[-1], "grid_3x3-009.svg")
+            # Each file must be valid XML
+            import xml.etree.ElementTree as ET
+            for p in result.written:
+                ET.fromstring(p.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

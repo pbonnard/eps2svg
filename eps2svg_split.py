@@ -56,7 +56,74 @@ def run_split(
     timeout: float = 30.0,
 ) -> SplitResult:
     """Detect icons in `src` and write one SVG per icon into `out_dir`."""
-    raise NotImplementedError("Filled in by later tasks.")
+    import sys
+
+    out_dir = Path(out_dir)
+    if out_dir.exists() and any(out_dir.iterdir()) and not force:
+        raise FileExistsError(
+            f"output directory {out_dir} is non-empty; pass force=True to overwrite"
+        )
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    interp, bbox = _capture_pages(
+        src, max_ops=max_ops, timeout=timeout, verbose=verbose
+    )
+
+    # Use the selected page's metadata + svg fragments.
+    page_idx = (page - 1) if page else 0
+    pages = [p for p in interp.pages if p] or [[]]
+    if page_idx >= len(pages):
+        page_idx = 0
+    page_fragments = pages[page_idx]
+
+    # Filter PathMeta to those whose svg_index points into the selected page.
+    # In multi-page files the metadata list mixes pages; we keep it simple by
+    # only using metadata when there's exactly one page (the common case for
+    # icon sheets). Multi-page sheets are an explicit out-of-scope edge.
+    if len(pages) > 1:
+        if verbose:
+            print(f"split: multi-page input; using page {page_idx + 1} only",
+                  file=sys.stderr)
+    meta_list = interp.path_metadata if len(pages) == 1 else []
+
+    # Phase 3 (geometric) only - Phase 2 added in the next task.
+    clusters = _phase3_geometric(meta_list)
+
+    if not (min_icons <= len(clusters) <= max_icons):
+        # Fallback: write the unsplit page SVG.
+        bx0, by0, bx1, by1 = bbox
+        width = max(1.0, bx1 - bx0); height = max(1.0, by1 - by0)
+        transform = f"translate({-bx0:.3f},{by1:.3f}) scale(1,-1)"
+        parts = [
+            '<?xml version="1.0" encoding="UTF-8" standalone="no"?>',
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 {width:.3f} {height:.3f}" '
+            f'width="{width:.3f}pt" height="{height:.3f}pt">',
+            f'<g transform="{transform}">',
+            *page_fragments,
+            "</g></svg>",
+        ]
+        dst = out_dir / f"{src.stem}.svg"
+        dst.write_text("\n".join(parts), encoding="utf-8")
+        if verbose:
+            print(f"split: detected {len(clusters)} cluster(s); fallback to "
+                  f"unsplit {dst.name}", file=sys.stderr)
+        return SplitResult(mode="fallback", icon_count=1, written=[dst])
+
+    ordered = _assign_layout(clusters)
+    written: list[Path] = []
+    for seq, (row, col, _orig_idx, shape) in enumerate(ordered, start=1):
+        path_fragments = [page_fragments[m.svg_index] for m in shape]
+        b = _shape_bbox(shape)
+        svg_text = _emit_icon_svg(path_fragments, b, pad)
+        filename = name_pattern.format(
+            stem=src.stem, index=seq, row=row + 1, col=col + 1
+        )
+        dst = out_dir / filename
+        dst.write_text(svg_text, encoding="utf-8")
+        written.append(dst)
+
+    return SplitResult(mode="geometric", icon_count=len(written), written=written)
 
 
 def _bbox_gap(a: tuple[float, float, float, float],
@@ -216,3 +283,34 @@ def _emit_icon_svg(path_fragments: list[str],
     parts.append("</g>")
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+def _capture_pages(src: Path, *, max_ops: int, timeout: float, verbose: bool):
+    """Run the interpreter on `src` and return (interp, bbox)."""
+    from eps2svg_pure import (
+        strip_eps_binary_header, parse_bbox, parse_page_size,
+        Interpreter, tokenize, _Budget, _ADOBE_PROLOG, _ExitException,
+        _BudgetExhausted,
+    )
+    raw = strip_eps_binary_header(src.read_bytes())
+    bbox = parse_bbox(raw)
+    if bbox is None:
+        ps = parse_page_size(raw)
+        bbox = (0.0, 0.0, ps[0], ps[1]) if ps else (0.0, 0.0, 612.0, 792.0)
+
+    budget = _Budget(max_ops=max_ops, max_seconds=timeout)
+    interp = Interpreter(bbox, budget=budget)
+    try:
+        interp._exec_tokens(tokenize(_ADOBE_PROLOG))
+    except (_ExitException, _BudgetExhausted):
+        pass
+    interp.budget = budget
+    try:
+        tokens = tokenize(raw.decode("latin-1", errors="replace"), budget=budget)
+    except _BudgetExhausted:
+        tokens = []
+    try:
+        interp._exec_tokens(tokens)
+    except (_ExitException, _BudgetExhausted):
+        pass
+    return interp, bbox
