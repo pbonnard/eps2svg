@@ -305,5 +305,31 @@ class CliTests(unittest.TestCase):
             self.assertIn("--split conflicts with -o/--output", r.stderr)
 
 
+class GettySmokeTests(unittest.TestCase):
+    CORPUS = Path("C:/Users/pbonn/Downloads")
+
+    @classmethod
+    def setUpClass(cls):
+        if not cls.CORPUS.exists():
+            raise unittest.SkipTest(f"Getty corpus not present at {cls.CORPUS}")
+        cls.samples = sorted(cls.CORPUS.glob("GettyImages-*.ps"))
+        if not cls.samples:
+            raise unittest.SkipTest("no GettyImages-*.ps in corpus")
+
+    def test_every_file_splits_or_falls_back_without_crashing(self):
+        from eps2svg_split import run_split
+        results = []
+        with tempfile.TemporaryDirectory() as td:
+            for i, sample in enumerate(self.samples):
+                out = Path(td) / f"sample_{i}"
+                r = run_split(sample, out, force=True, timeout=15.0)
+                results.append((sample.name, r.mode, r.icon_count))
+        # Print summary for the developer (visible in -v)
+        for name, mode, n in results:
+            print(f"  {name}: {mode}, {n} icon(s)")
+        # Trivial assertion — the real check is that nothing raised
+        self.assertEqual(len(results), len(self.samples))
+
+
 if __name__ == "__main__":
     unittest.main()
