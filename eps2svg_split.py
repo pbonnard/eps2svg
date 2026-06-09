@@ -187,3 +187,32 @@ def _assign_layout(shapes: list[list["PathMeta"]]):
     enriched = list(zip(row_idx, col_idx, range(len(shapes)), shapes))
     enriched.sort(key=lambda t: (t[0], t[1]))
     return enriched
+
+
+def _emit_icon_svg(path_fragments: list[str],
+                   bbox: tuple[float, float, float, float],
+                   pad: float) -> str:
+    """Build a standalone SVG document for one icon.
+
+    `path_fragments` are the raw `<path …/>` strings the interpreter emitted,
+    already in PostScript device coordinates. `bbox` is the icon's union bbox.
+    The wrapping <g> applies pad-translate, origin-translate, and the PS Y-flip
+    that the parent page SVG normally applies — re-derived locally per icon.
+    """
+    x0, y0, x1, y1 = bbox
+    w = max(1.0, (x1 - x0) + 2 * pad)
+    h = max(1.0, (y1 - y0) + 2 * pad)
+    tx = pad - x0
+    ty = y1 + pad
+    parts: list[str] = []
+    parts.append('<?xml version="1.0" encoding="UTF-8" standalone="no"?>')
+    parts.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {w:.3f} {h:.3f}" '
+        f'width="{w:.3f}pt" height="{h:.3f}pt">'
+    )
+    parts.append(f'<g transform="translate({tx:.3f},{ty:.3f}) scale(1,-1)">')
+    parts.extend(path_fragments)
+    parts.append("</g>")
+    parts.append("</svg>")
+    return "\n".join(parts)

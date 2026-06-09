@@ -161,5 +161,21 @@ class Phase4Tests(unittest.TestCase):
         self.assertEqual(first_three_orig_idx, [0, 1, 2])
 
 
+class Phase5Tests(unittest.TestCase):
+    def test_emit_icon_svg_has_viewbox_and_paths(self):
+        from eps2svg_split import _emit_icon_svg
+        svg = _emit_icon_svg(
+            ['<path d="M0 0 L40 40 Z" fill="#000"/>'],
+            (0, 0, 40, 40),
+            pad=2.0,
+        )
+        self.assertIn('viewBox="0 0 44.000 44.000"', svg)
+        self.assertIn('width="44.000pt"', svg)
+        self.assertIn('<path d="M0 0 L40 40 Z"', svg)
+        # Sanity: it should be parseable XML
+        import xml.etree.ElementTree as ET
+        ET.fromstring(svg)
+
+
 if __name__ == "__main__":
     unittest.main()
