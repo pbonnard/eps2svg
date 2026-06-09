@@ -756,6 +756,10 @@ class Interpreter:
     # Graphics state
     def op_gsave(self):
         self.gstate_stack.append(self.gstate.copy())
+        if len(self.gstate_stack) == 1:
+            # Depth went from 0 to 1 → start a new top-level group
+            self.current_group_id = self._next_group_id
+            self._next_group_id += 1
 
     def op_gsave_silent(self):
         self.gstate_stack.append(self.gstate.copy())
@@ -764,6 +768,9 @@ class Interpreter:
     def op_grestore(self):
         if self.gstate_stack:
             self.gstate = self.gstate_stack.pop()
+        if len(self.gstate_stack) == 0:
+            # Back to depth 0 → close the current top-level group
+            self.current_group_id = None
 
     def op_restore(self):
         token = self.stack.pop()

@@ -39,5 +39,20 @@ class PathMetaTests(unittest.TestCase):
             self.assertIsNone(meta.group_id)   # no gsave/grestore in this fixture
 
 
+class GroupIdTests(unittest.TestCase):
+    def test_gsave_grouped_assigns_four_distinct_group_ids(self):
+        from eps2svg_pure import Interpreter, tokenize, _ADOBE_PROLOG
+        src = (FIXTURES / "gsave_grouped.eps").read_text(encoding="latin-1")
+        interp = Interpreter((0, 0, 300, 300))
+        interp._exec_tokens(tokenize(_ADOBE_PROLOG))
+        interp._exec_tokens(tokenize(src))
+        # 4 gsave/grestore icons × 2 paths each = 8 PathMeta records
+        self.assertEqual(len(interp.path_metadata), 8)
+        # All have a group_id (none None) and there are exactly 4 distinct values
+        gids = {m.group_id for m in interp.path_metadata}
+        self.assertEqual(len(gids), 4)
+        self.assertNotIn(None, gids)
+
+
 if __name__ == "__main__":
     unittest.main()
