@@ -63,6 +63,26 @@ pip install ".[gui]" "pyinstaller>=6.0"
 pyinstaller eps2svg-gui.spec       # produces dist/eps2svg-gui.exe
 ```
 
+## PowerPoint export (.pptx)
+
+Convert an EPS/PS file to a native PowerPoint deck where every vector path is an
+**editable DrawingML shape** (not a flattened picture). Pure-Python, no external
+tools, no third-party libraries.
+
+```bash
+eps2svg logo.eps --format pptx          # -> logo.pptx (one 16:9 slide)
+eps2svg sheet.ps --format pptx -d out/  # batch into out/
+```
+
+- Each path becomes an editable freeform shape (recolor / move / ungroup in
+  PowerPoint), placed on a 16:9 slide, scaled to fit and centered.
+- Vector-less files (embedded-JPEG stock art) embed the largest JPEG as a slide
+  picture.
+- Desktop GUI: select a file and click **Export PPTX…**.
+- Limitations (v1): single page; no text, gradients, clipping, or grouping;
+  even-odd fills approximate as nonzero. `--format pptx` requires the
+  pure-Python backend.
+
 ## Backends
 
 | # | Backend | Notes |

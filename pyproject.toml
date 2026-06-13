@@ -31,4 +31,4 @@ eps2svg-gui = "eps2svg_gui.app:main"
 
 [tool.setuptools]
 py-modules = ["eps2svg", "eps2svg_pure", "eps2svg_split", "eps2svg_grid"]
-packages = ["eps2svg_gui"]
+packages = ["eps2svg_gui", "eps2pptx"]

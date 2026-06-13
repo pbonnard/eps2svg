@@ -79,6 +79,11 @@ class MainWindow(QMainWindow):
         self.split_btn.clicked.connect(self._open_split)
         bar.addWidget(self.split_btn)
 
+        self.pptx_btn = QPushButton("Export PPTX…")
+        self.pptx_btn.setEnabled(False)
+        self.pptx_btn.clicked.connect(self._export_pptx)
+        bar.addWidget(self.pptx_btn)
+
     def _build_central(self) -> None:
         splitter = QSplitter(Qt.Horizontal)
 
@@ -187,8 +192,10 @@ class MainWindow(QMainWindow):
     # ---- preview + status ------------------------------------------------
 
     def _on_selection_changed(self, current_row: int) -> None:
-        self.split_btn.setEnabled(0 <= current_row < len(self.rows))
-        if 0 <= current_row < len(self.rows):
+        has_sel = 0 <= current_row < len(self.rows)
+        self.split_btn.setEnabled(has_sel)
+        self.pptx_btn.setEnabled(has_sel)
+        if has_sel:
             self._preview_row(current_row)
 
     def _preview_row(self, row_id: int) -> None:
@@ -206,6 +213,24 @@ class MainWindow(QMainWindow):
         win = SplitWindow(self.rows[row_id].src, output_dir=self.output_dir)
         self._split_windows.append(win)
         win.show()
+
+    def _export_pptx(self) -> None:
+        row_id = self.list_widget.currentRow()
+        if not (0 <= row_id < len(self.rows)):
+            return
+        from eps2svg_gui.paths import resolve_output_path
+        from eps2svg_gui.pptx_worker import PptxExportTask
+        src = self.rows[row_id].src
+        out_dir = str(self.output_dir) if self.output_dir else None
+        dst = resolve_output_path(src, out_dir).with_suffix(".pptx")
+        task = PptxExportTask(src, dst)
+        task.signals.finished.connect(
+            lambda ok, msg: self.statusBar().showMessage(
+                msg if ok else f"error: {msg}"
+            )
+        )
+        self.statusBar().showMessage("exporting PPTX…")
+        self.pool.start(task)
 
     def _refresh_item(self, row_id: int) -> None:
         item = self.list_widget.item(row_id)

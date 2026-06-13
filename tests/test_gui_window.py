@@ -93,6 +93,15 @@ class MainWindowModelTests(unittest.TestCase):
         w.list_widget.setCurrentRow(0)
         self.assertTrue(w.split_btn.isEnabled())
 
+    def test_pptx_button_enabled_only_with_selection(self):
+        from eps2svg_gui.main_window import MainWindow
+        from eps2svg_gui.file_list import FileRow
+        w = MainWindow()
+        self.assertFalse(w.pptx_btn.isEnabled())
+        w._append_row(FileRow(src=Path("logo.eps")))
+        w.list_widget.setCurrentRow(0)
+        self.assertTrue(w.pptx_btn.isEnabled())
+
 
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class MainWindowEndToEndTests(unittest.TestCase):
