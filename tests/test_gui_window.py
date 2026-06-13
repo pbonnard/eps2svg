@@ -65,6 +65,25 @@ class MainWindowModelTests(unittest.TestCase):
             w._preview_row(err)
             self.assertIsNone(w.preview._item)
 
+    def test_done_row_has_no_tooltip(self):
+        from eps2svg_gui.main_window import MainWindow
+        from eps2svg_gui.file_list import FileRow
+        w = MainWindow()
+        rid = w._append_row(FileRow(src=Path("logo.eps")))
+        w._on_finished(rid, True, "logo.svg", "Pure Python")
+        self.assertEqual(w.list_widget.item(rid).toolTip(), "")
+
+    def test_fit_and_one_to_one_buttons_present_and_clickable(self):
+        from eps2svg_gui.main_window import MainWindow
+        from PySide6.QtWidgets import QPushButton
+        w = MainWindow()
+        buttons = {b.text(): b for b in w.findChildren(QPushButton)}
+        self.assertIn("Fit", buttons)
+        self.assertIn("1:1", buttons)
+        # Clicking with no SVG loaded must not raise.
+        buttons["Fit"].click()
+        buttons["1:1"].click()
+
 
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class MainWindowEndToEndTests(unittest.TestCase):

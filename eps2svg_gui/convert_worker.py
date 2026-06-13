@@ -18,6 +18,10 @@ _MAX_OPS = 5_000_000
 class WorkerSignals(QObject):
     # row_id, ok, out_path (str, "" on failure), message (backend name or error)
     finished = Signal(int, bool, str, str)
+    # Note: this signals object is created on the GUI thread (in __init__,
+    # called from MainWindow._submit), so `finished` is delivered to the main
+    # thread via a queued connection. run() emits before returning, so the
+    # event is posted while the task — and this object — are still referenced.
 
 
 class ConvertTask(QRunnable):

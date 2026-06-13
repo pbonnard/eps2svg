@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QToolBar,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -78,8 +79,24 @@ class MainWindow(QMainWindow):
         self.list_widget.currentRowChanged.connect(self._on_selection_changed)
         splitter.addWidget(self.list_widget)
 
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
         self.preview = SvgPreview()
-        splitter.addWidget(self.preview)
+        right_layout.addWidget(self.preview)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        fit_btn = QPushButton("Fit")
+        fit_btn.clicked.connect(lambda: self.preview.fit())
+        one_to_one_btn = QPushButton("1:1")
+        one_to_one_btn.clicked.connect(lambda: self.preview.actual_size())
+        controls.addWidget(fit_btn)
+        controls.addWidget(one_to_one_btn)
+        controls.addStretch(1)
+        right_layout.addLayout(controls)
+
+        splitter.addWidget(right)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([320, 680])
@@ -177,7 +194,10 @@ class MainWindow(QMainWindow):
         item = self.list_widget.item(row_id)
         row = self.rows[row_id]
         item.setText(row_label(row))
-        item.setToolTip(row.message)
+        # Only errors carry a hover message; on success row.message is the
+        # backend name, which shouldn't linger as a tooltip (e.g. after a
+        # failed row is re-converted successfully).
+        item.setToolTip(row.message if row.status is RowStatus.ERROR else "")
 
     def _update_status_bar(self) -> None:
         done = sum(1 for r in self.rows if r.status == RowStatus.DONE)
