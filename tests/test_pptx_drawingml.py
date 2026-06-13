@@ -84,6 +84,20 @@ class ShapeXmlTests(unittest.TestCase):
         self.assertIsNone(shape_xml("", {"fill": "#000000"}, self._identity(),
                                     s=1.0, shape_id=2))
 
+    def test_line_child_order_dash_before_join(self):
+        # CT_LineProperties requires fill -> prstDash -> join order; real
+        # PowerPoint rejects the reverse even though python-pptx tolerates it.
+        from eps2pptx.drawingml import shape_xml
+        xml = shape_xml(
+            "M0 0 L100 0 L100 100",
+            {"fill": "none", "stroke": "#000000", "stroke-width": "2",
+             "stroke-linejoin": "miter", "stroke-dasharray": "3,3"},
+            self._identity(), s=1.0, shape_id=5,
+        )
+        self.assertIn("<a:prstDash", xml)
+        self.assertIn("<a:miter/>", xml)
+        self.assertLess(xml.index("<a:prstDash"), xml.index("<a:miter/>"))
+
 
 class PictureXmlTests(unittest.TestCase):
     def test_picture_references_embed_rid(self):

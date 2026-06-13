@@ -57,12 +57,13 @@ def _line_xml(style: dict, s: float) -> str:
     cap = _CAP.get(style.get("stroke-linecap", ""))
     if cap:
         attrs.append(f'cap="{cap}"')
+    # CT_LineProperties requires this child order: fill, prstDash, join.
     parts = [f'<a:ln {" ".join(attrs)}>', _solid_fill(stroke)]
+    if style.get("stroke-dasharray"):
+        parts.append('<a:prstDash val="dash"/>')
     join = _JOIN.get(style.get("stroke-linejoin", ""))
     if join:
         parts.append(join)
-    if style.get("stroke-dasharray"):
-        parts.append('<a:prstDash val="dash"/>')
     parts.append("</a:ln>")
     return "".join(parts)
 
