@@ -145,3 +145,23 @@ class MainWindowEndToEndTests(unittest.TestCase):
             w = MainWindow()
             w.add_paths([str(junk)])
             self.assertEqual(len(w.rows), 0)
+
+    def test_export_pptx_updates_status_when_done(self):
+        from eps2svg_gui.main_window import MainWindow
+        from eps2svg_gui.file_list import FileRow
+        app = ensure_qapp()
+        with tempfile.TemporaryDirectory() as d:
+            w = MainWindow()
+            w.set_output_dir(d)
+            rid = w._append_row(FileRow(src=FIXTURES / "grid_3x3.eps"))
+            w.list_widget.setCurrentRow(rid)
+            w._export_pptx()
+            waited = 0.0
+            while waited < 8.0 and "exporting" in w.statusBar().currentMessage().lower():
+                app.processEvents()
+                time.sleep(0.02)
+                waited += 0.02
+            msg = w.statusBar().currentMessage()
+            self.assertNotIn("exporting", msg.lower(), "status stuck on 'exporting'")
+            self.assertIn("pptx", msg.lower())
+            self.assertTrue((Path(d) / "grid_3x3.pptx").exists())

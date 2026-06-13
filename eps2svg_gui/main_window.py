@@ -230,13 +230,16 @@ class MainWindow(QMainWindow):
         out_dir = str(self.output_dir) if self.output_dir else None
         dst = resolve_output_path(src, out_dir).with_suffix(".pptx")
         task = PptxExportTask(src, dst)
-        task.signals.finished.connect(
-            lambda ok, msg: self.statusBar().showMessage(
-                msg if ok else f"error: {msg}"
-            )
-        )
+        # Connect to a bound method of this (long-lived) window, not a lambda:
+        # a queued cross-thread connection to a context-less functor is dropped
+        # when QThreadPool auto-deletes the task's signals object after run(),
+        # which would leave the status stuck on "exporting PPTX…".
+        task.signals.finished.connect(self._on_pptx_finished)
         self.statusBar().showMessage("exporting PPTX…")
         self.pool.start(task)
+
+    def _on_pptx_finished(self, ok: bool, message: str) -> None:
+        self.statusBar().showMessage(message if ok else f"error: {message}")
 
     def _refresh_item(self, row_id: int) -> None:
         item = self.list_widget.item(row_id)
