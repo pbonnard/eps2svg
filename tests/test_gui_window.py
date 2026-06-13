@@ -102,6 +102,18 @@ class MainWindowModelTests(unittest.TestCase):
         w.list_widget.setCurrentRow(0)
         self.assertTrue(w.pptx_btn.isEnabled())
 
+    def test_action_toolbar_fits_default_window(self):
+        # Regression: the toolbar holding the action buttons must not exceed
+        # the default window width, else the rightmost button (Export PPTX…)
+        # is pushed into the overflow chevron and is invisible.
+        from eps2svg_gui.main_window import MainWindow
+        from PySide6.QtWidgets import QToolBar
+        w = MainWindow()
+        w.resize(1000, 640)
+        action_bar = next(b for b in w.findChildren(QToolBar)
+                          if b.isAncestorOf(w.pptx_btn))
+        self.assertLessEqual(action_bar.sizeHint().width(), w.width())
+
 
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class MainWindowEndToEndTests(unittest.TestCase):

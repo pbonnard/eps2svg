@@ -66,14 +66,6 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.recurse_checkbox)
 
         bar.addSeparator()
-        bar.addWidget(QLabel("Output:"))
-        self.output_label = QLabel(_NEXT_TO_SOURCE)
-        bar.addWidget(self.output_label)
-        change = QPushButton("Change…")
-        change.clicked.connect(self._choose_output_dir)
-        bar.addWidget(change)
-
-        bar.addSeparator()
         self.split_btn = QPushButton("Split…")
         self.split_btn.setEnabled(False)
         self.split_btn.clicked.connect(self._open_split)
@@ -83,6 +75,20 @@ class MainWindow(QMainWindow):
         self.pptx_btn.setEnabled(False)
         self.pptx_btn.clicked.connect(self._export_pptx)
         bar.addWidget(self.pptx_btn)
+
+        # Output-destination controls live on a second toolbar row: the output
+        # path can be long, so keeping it off the action row prevents the row
+        # from overflowing and hiding the rightmost action button.
+        self.addToolBarBreak()
+        out_bar = QToolBar()
+        out_bar.setMovable(False)
+        self.addToolBar(out_bar)
+        out_bar.addWidget(QLabel("Output:"))
+        self.output_label = QLabel(_NEXT_TO_SOURCE)
+        out_bar.addWidget(self.output_label)
+        change = QPushButton("Change…")
+        change.clicked.connect(self._choose_output_dir)
+        out_bar.addWidget(change)
 
     def _build_central(self) -> None:
         splitter = QSplitter(Qt.Horizontal)
