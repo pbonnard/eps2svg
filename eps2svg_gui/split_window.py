@@ -103,6 +103,7 @@ class SplitWindow(QMainWindow):
         out_layout.addWidget(change)
         out_layout.addWidget(QLabel("Name pattern:"))
         self.name_edit = QLineEdit(_DEFAULT_NAME)
+        self.name_edit.setToolTip("Placeholders: {stem}, {index}, {row}, {col}")
         out_layout.addWidget(self.name_edit)
         self.count_label = QLabel("Cells with content: -")
         out_layout.addWidget(self.count_label)

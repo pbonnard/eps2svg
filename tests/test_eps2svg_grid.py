@@ -90,3 +90,30 @@ class SuggestGridTests(unittest.TestCase):
         import eps2svg_grid
         doc = eps2svg_grid.SplitDocument("<svg/>", 10.0, 10.0, [], (0, 0, 10, 10))
         self.assertIsNone(doc.suggest_grid())
+
+
+class IgnoreBackgroundTests(unittest.TestCase):
+    def _doc_with_background(self):
+        from eps2svg_grid import SplitDocument, _PathRec
+        # A full-page background rect (centre 150,150) plus one small icon
+        # (centre 50,50), on a 300x300 page.
+        recs = [
+            _PathRec(svg_index=0, fragment="<path id='bg'/>",
+                     bbox=(0, 0, 300, 300), group_id=None,
+                     cx=150, cy=150, bbox_svg=(0, 0, 300, 300)),
+            _PathRec(svg_index=1, fragment="<path id='icon'/>",
+                     bbox=(40, 40, 60, 60), group_id=None,
+                     cx=50, cy=50, bbox_svg=(40, 240, 60, 260)),
+        ]
+        return SplitDocument("<svg/>", 300.0, 300.0, recs, (0, 0, 300, 300))
+
+    def test_ignore_background_drops_page_spanning_path(self):
+        doc = self._doc_with_background()
+        cells = _uniform_cells(0, 0, 300, 300, 2, 2)
+        # Without the filter: background cell (1,1) and icon cell (0,0) both count.
+        self.assertEqual(doc.content_cell_count(cells), 2)
+        # With it: the page-spanning rect is dropped, only the icon remains.
+        self.assertEqual(doc.content_cell_count(cells, ignore_background=True), 1)
+        results = doc.extract_grid(cells, ignore_background=True)
+        self.assertEqual(len(results), 1)
+        self.assertIn("icon", results[0].svg_text)
