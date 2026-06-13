@@ -1,0 +1,57 @@
+"""Pure path helpers for the GUI — no Qt, no engine import, fully unit-testable.
+
+SUPPORTED_EXTS mirrors eps2svg._EPS_EXTS; kept local to avoid importing the CLI
+module just for a constant.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+SUPPORTED_EXTS = (".eps", ".ps", ".epsf")
+
+
+def is_supported(path) -> bool:
+    """True if `path` has an EPS/PS extension we accept (case-insensitive)."""
+    return Path(path).suffix.lower() in SUPPORTED_EXTS
+
+
+def resolve_output_path(src, output_dir=None) -> Path:
+    """Where the SVG for `src` should be written.
+
+    - output_dir is None  -> next to the source as <stem>.svg
+    - output_dir is set    -> <output_dir>/<stem>.svg
+    """
+    src = Path(src)
+    if output_dir is not None:
+        return Path(output_dir) / src.with_suffix(".svg").name
+    return src.with_suffix(".svg")
+
+
+def enumerate_inputs(paths, recursive: bool = False) -> list[Path]:
+    """Expand a list of file/dir paths into concrete supported source files.
+
+    Files are kept if supported; directories are scanned (recursively when
+    `recursive`). Results are de-duplicated, preserving first-seen order.
+    """
+    out: list[Path] = []
+    seen: set[str] = set()
+
+    def add(p: Path) -> None:
+        key = str(p.resolve()) if p.exists() else str(p)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(p)
+
+    for raw in paths:
+        p = Path(raw)
+        if p.is_dir():
+            pattern = "**/*" if recursive else "*"
+            for child in sorted(p.glob(pattern)):
+                if child.is_file() and is_supported(child):
+                    add(child)
+        elif p.is_file() and is_supported(p):
+            add(p)
+
+    return out
