@@ -23,6 +23,31 @@ eps2svg --diagnose                            # show available backends
 
 No external tools required for the pure-Python backend — it ships in the package.
 
+## Desktop GUI (Windows)
+
+A PySide6 desktop app wraps the same engine with a file list + live SVG preview.
+
+```bash
+pip install ".[gui]"     # installs PySide6
+eps2svg-gui              # launch the app (no console window)
+# or, without installing the entry point:
+python -m eps2svg_gui
+```
+
+- Drag-and-drop (or **Add Files…/Add Folder…**) EPS/PS files; drop one to
+  preview it, drop many to batch-convert with per-file status.
+- Output goes next to each source by default; use **Change…** to pick an
+  output folder for the session.
+- Conversions run off the UI thread, so the window stays responsive; engine
+  defaults (auto backend, dpi 96, 30 s timeout) match the CLI.
+
+### Building a standalone `.exe`
+
+```bash
+pip install ".[gui]" "pyinstaller>=6.0"
+pyinstaller eps2svg-gui.spec       # produces dist/eps2svg-gui.exe
+```
+
 ## Backends
 
 | # | Backend | Notes |
