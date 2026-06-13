@@ -71,3 +71,22 @@ class ExtractTests(unittest.TestCase):
                 eps2svg_grid.write_grid(doc, d, cells, stem="grid")
             written = eps2svg_grid.write_grid(doc, d, cells, stem="grid", force=True)
             self.assertEqual(len(written), 9)
+
+
+class SuggestGridTests(unittest.TestCase):
+    def test_suggests_three_by_three_for_grid_fixture(self):
+        import eps2svg_grid
+        doc = eps2svg_grid.prepare_split(FIXTURES / "grid_3x3.eps")
+        suggestion = doc.suggest_grid()
+        self.assertIsNotNone(suggestion)
+        rows, cols, frame = suggestion
+        self.assertEqual(rows, 3)
+        self.assertEqual(cols, 3)
+        x0, y0, x1, y1 = frame
+        self.assertLess(x0, x1)
+        self.assertLess(y0, y1)
+
+    def test_suggest_grid_none_when_no_paths(self):
+        import eps2svg_grid
+        doc = eps2svg_grid.SplitDocument("<svg/>", 10.0, 10.0, [], (0, 0, 10, 10))
+        self.assertIsNone(doc.suggest_grid())
