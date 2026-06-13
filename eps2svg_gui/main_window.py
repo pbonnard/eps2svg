@@ -170,6 +170,8 @@ class MainWindow(QMainWindow):
         row = self.rows[row_id]
         if row.status == RowStatus.DONE and row.out_path:
             self.preview.load(row.out_path)
+        else:
+            self.preview.clear()
 
     def _refresh_item(self, row_id: int) -> None:
         item = self.list_widget.item(row_id)

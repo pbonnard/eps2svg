@@ -46,6 +46,25 @@ class MainWindowModelTests(unittest.TestCase):
         w.set_output_dir(None)
         self.assertIn("Next to source", w.output_label.text())
 
+    def test_previewing_non_done_row_clears_stale_svg(self):
+        from eps2svg_gui.main_window import MainWindow
+        from eps2svg_gui.convert_worker import ConvertTask
+        from eps2svg_gui.file_list import FileRow
+        with tempfile.TemporaryDirectory() as d:
+            w = MainWindow()
+            results = []
+            task = ConvertTask(0, FIXTURES / "grid_3x3.eps", output_dir=d)
+            task.signals.finished.connect(lambda *a: results.append(a))
+            task.run()
+            done = w._append_row(FileRow(src=FIXTURES / "grid_3x3.eps"))
+            w._on_finished(done, True, results[0][2], "Pure Python")
+            w._preview_row(done)
+            self.assertIsNotNone(w.preview._item)
+            err = w._append_row(FileRow(src=Path("bad.eps")))
+            w._on_finished(err, False, "", "boom")
+            w._preview_row(err)
+            self.assertIsNone(w.preview._item)
+
 
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class MainWindowEndToEndTests(unittest.TestCase):
