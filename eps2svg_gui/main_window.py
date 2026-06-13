@@ -38,6 +38,7 @@ class MainWindow(QMainWindow):
 
         self.rows: list[FileRow] = []
         self.output_dir: Path | None = None
+        self._split_windows: list = []
 
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(min(4, os.cpu_count() or 1))
@@ -71,6 +72,12 @@ class MainWindow(QMainWindow):
         change = QPushButton("Change…")
         change.clicked.connect(self._choose_output_dir)
         bar.addWidget(change)
+
+        bar.addSeparator()
+        self.split_btn = QPushButton("Split…")
+        self.split_btn.setEnabled(False)
+        self.split_btn.clicked.connect(self._open_split)
+        bar.addWidget(self.split_btn)
 
     def _build_central(self) -> None:
         splitter = QSplitter(Qt.Horizontal)
@@ -180,6 +187,7 @@ class MainWindow(QMainWindow):
     # ---- preview + status ------------------------------------------------
 
     def _on_selection_changed(self, current_row: int) -> None:
+        self.split_btn.setEnabled(0 <= current_row < len(self.rows))
         if 0 <= current_row < len(self.rows):
             self._preview_row(current_row)
 
@@ -189,6 +197,15 @@ class MainWindow(QMainWindow):
             self.preview.load(row.out_path)
         else:
             self.preview.clear()
+
+    def _open_split(self) -> None:
+        row_id = self.list_widget.currentRow()
+        if not (0 <= row_id < len(self.rows)):
+            return
+        from eps2svg_gui.split_window import SplitWindow
+        win = SplitWindow(self.rows[row_id].src, output_dir=self.output_dir)
+        self._split_windows.append(win)
+        win.show()
 
     def _refresh_item(self, row_id: int) -> None:
         item = self.list_widget.item(row_id)
