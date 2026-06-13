@@ -428,6 +428,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Skip post-processing that removes white background rects")
     p.add_argument("--backend", metavar="NAME",
                    help="Force a specific backend prefix (pure / inkscape / ghostscript)")
+    p.add_argument("--format", choices=["svg", "pptx"], default="svg",
+                   help="Output format: svg (default) or pptx (native "
+                        "PowerPoint with editable shapes; pure-Python only)")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Show converter commands and details")
     return p
@@ -520,6 +523,11 @@ def main(argv: list[str] | None = None) -> int:
                      f"(got {len(inputs)} after expansion).")
     if args.output and args.output_dir:
         parser.error("--output and --output-dir are mutually exclusive.")
+    if args.format == "pptx":
+        if args.split:
+            parser.error("--format pptx conflicts with --split.")
+        if args.backend and not args.backend.lower().startswith("pure"):
+            parser.error("--format pptx requires the pure-Python backend.")
     if args.split:
         if args.output:
             parser.error("--split conflicts with -o/--output; use -d DIR.")
@@ -540,12 +548,13 @@ def main(argv: list[str] | None = None) -> int:
         if src.suffix.lower() not in _EPS_EXTS:
             print(f"warning: {src}: unexpected extension (continuing anyway)", file=sys.stderr)
 
+        ext = ".pptx" if args.format == "pptx" else ".svg"
         if args.output:
             dst = Path(args.output)
         elif out_dir:
-            dst = out_dir / src.with_suffix(".svg").name
+            dst = out_dir / src.with_suffix(ext).name
         else:
-            dst = src.with_suffix(".svg")
+            dst = src.with_suffix(ext)
 
         # Pre-validate --page against actual page count
         if args.page is not None:
@@ -561,7 +570,16 @@ def main(argv: list[str] | None = None) -> int:
                 pass  # best-effort; fall through to backend
 
         try:
-            if args.split:
+            if args.format == "pptx":
+                from eps2pptx import convert_eps_to_pptx
+                status = convert_eps_to_pptx(
+                    src, dst, page=args.page,
+                    max_ops=args.max_ops, timeout=args.timeout,
+                    verbose=args.verbose,
+                )
+                size_kb = dst.stat().st_size / 1024
+                print(f"{src}  ->  {dst}  [{status}, {size_kb:.1f} KB]")
+            elif args.split:
                 from eps2svg_split import run_split
                 target_dir = (Path(args.output_dir) if args.output_dir
                               else src.with_suffix("").parent / f"{src.stem}-icons")
