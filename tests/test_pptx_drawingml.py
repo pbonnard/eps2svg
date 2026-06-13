@@ -37,3 +37,59 @@ class ParseFragmentTests(unittest.TestCase):
         self.assertEqual(style["fill"], "none")
         self.assertEqual(style["stroke"], "#00ff00")
         self.assertEqual(style["stroke-width"], "2.500")
+
+
+class ShapeXmlTests(unittest.TestCase):
+    def _identity(self):
+        return lambda X, Y: (X, Y)  # EMU == input units for easy assertions
+
+    def test_filled_square_shape(self):
+        from eps2pptx.drawingml import shape_xml
+        xml = shape_xml(
+            "M0 0 L100 0 L100 100 L0 100 Z",
+            {"fill": "#ff0000", "stroke": "none"},
+            self._identity(), s=1.0, shape_id=2,
+        )
+        self.assertIn("<p:sp>", xml)
+        self.assertIn("<a:custGeom>", xml)
+        self.assertIn("<a:moveTo>", xml)
+        self.assertIn("<a:lnTo>", xml)
+        self.assertIn("<a:close/>", xml)
+        self.assertIn('<a:srgbClr val="FF0000"/>', xml)
+        self.assertIn('<a:ext cx="100" cy="100"/>', xml)
+
+    def test_cubic_emits_cubicbezto_with_three_points(self):
+        from eps2pptx.drawingml import shape_xml
+        xml = shape_xml(
+            "M0 0 C0 50 50 100 100 100",
+            {"fill": "#000000", "stroke": "none"},
+            self._identity(), s=1.0, shape_id=3,
+        )
+        self.assertIn("<a:cubicBezTo>", xml)
+        self.assertEqual(xml.count("<a:pt", xml.find("<a:cubicBezTo>")), 3 + 0)  # 3 pts inside
+
+    def test_stroke_path_emits_line_and_nofill(self):
+        from eps2pptx.drawingml import shape_xml
+        xml = shape_xml(
+            "M0 0 L100 0",
+            {"fill": "none", "stroke": "#00ff00", "stroke-width": "2"},
+            self._identity(), s=1.0, shape_id=4,
+        )
+        self.assertIn("<a:noFill/>", xml)
+        self.assertIn("<a:ln", xml)
+        self.assertIn('<a:srgbClr val="00FF00"/>', xml)
+
+    def test_empty_d_returns_none(self):
+        from eps2pptx.drawingml import shape_xml
+        self.assertIsNone(shape_xml("", {"fill": "#000000"}, self._identity(),
+                                    s=1.0, shape_id=2))
+
+
+class PictureXmlTests(unittest.TestCase):
+    def test_picture_references_embed_rid(self):
+        from eps2pptx.drawingml import picture_xml
+        xml = picture_xml(off=(10, 20), ext=(300, 400), rid="rId2", pic_id=2)
+        self.assertIn("<p:pic>", xml)
+        self.assertIn('r:embed="rId2"', xml)
+        self.assertIn('<a:off x="10" y="20"/>', xml)
+        self.assertIn('<a:ext cx="300" cy="400"/>', xml)
