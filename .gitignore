@@ -15,3 +15,7 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Internal docs and agent instructions (not published)
+docs/superpowers/
+CLAUDE.md
