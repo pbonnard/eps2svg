@@ -41,6 +41,21 @@ python -m eps2svg_gui
 - Conversions run off the UI thread, so the window stays responsive; engine
   defaults (auto backend, dpi 96, 30 s timeout) match the CLI.
 
+### Splitting icon sheets in the GUI
+
+Select a file and click **Split…** to open the Split window:
+
+- **Auto-split now** runs the automatic detector (the same engine as the CLI
+  `--split`) and writes one SVG per detected icon.
+- **Auto-detect grid** seeds an editable grid from that detection so you can
+  verify it visually.
+- Or define the grid by hand: set **Rows**/**Cols** and drag the blue frame to
+  cover the icons; drag interior gridlines to fix uneven spacing. **Extract**
+  writes one cropped SVG per non-empty cell. **Ignore background** drops
+  page-spanning shapes (borders/backgrounds) before slicing.
+
+Output goes to `<name>-icons/` next to the source (or the chosen output folder).
+
 ### Building a standalone `.exe`
 
 ```bash
