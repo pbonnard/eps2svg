@@ -54,3 +54,24 @@ class SplitWindowTests(unittest.TestCase):
         win = SplitWindow(Path("nope.eps"), autostart=False)
         win._on_failed("boom")
         self.assertIn("boom", win.status_label.text())
+
+    def test_extract_into_nonempty_dir_declined_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "keep.txt").write_text("x")
+            win = self._prepared_window(output_dir=d)
+            win.rows_spin.setValue(3)
+            win.cols_spin.setValue(3)
+            win._ask_overwrite = lambda out_dir: False  # user declines
+            win._on_extract()
+            self.assertEqual(list(Path(d).glob("*.svg")), [])
+            self.assertIn("cancelled", win.status_label.text())
+
+    def test_extract_into_nonempty_dir_confirmed_forces_write(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "keep.txt").write_text("x")
+            win = self._prepared_window(output_dir=d)
+            win.rows_spin.setValue(3)
+            win.cols_spin.setValue(3)
+            win._ask_overwrite = lambda out_dir: True  # user confirms
+            win._on_extract()
+            self.assertEqual(len(list(Path(d).glob("*.svg"))), 9)

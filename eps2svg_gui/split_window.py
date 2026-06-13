@@ -241,6 +241,9 @@ class SplitWindow(QMainWindow):
 
     def _on_auto_split(self):
         out_dir = self._resolve_out_dir()
+        # "Ignore background" maps to run_split's grid/lattice mode, which drops
+        # page-spanning shapes (and snaps clusters to a lattice) — intentional:
+        # that mode subsumes background filtering for the auto-detect path.
         task = AutoSplitTask(self.src, out_dir, grid=self.ignore_bg.isChecked(),
                              force=True)
         task.signals.finished.connect(
