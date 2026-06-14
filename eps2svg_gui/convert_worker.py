@@ -37,6 +37,8 @@ class ConvertTask(QRunnable):
         try:
             if self.fmt == "pptx":
                 message, dst = self._to_pptx()
+            elif self.fmt == "emf":
+                message, dst = self._to_emf()
             else:
                 message, dst = self._to_svg()
             self.signals.finished.emit(self.row_id, True, str(dst), message)
@@ -62,4 +64,10 @@ class ConvertTask(QRunnable):
         from eps2pptx import convert_eps_to_pptx
         dst = resolve_output_path(self.src, self.output_dir, ext=".pptx")
         status = convert_eps_to_pptx(self.src, dst)
+        return status, dst
+
+    def _to_emf(self):
+        from eps2emf import convert_eps_to_emf
+        dst = resolve_output_path(self.src, self.output_dir, ext=".emf")
+        status = convert_eps_to_emf(self.src, dst)
         return status, dst

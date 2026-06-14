@@ -40,12 +40,12 @@ python -m eps2svg_gui
 - Each row shows the backend that will process it (e.g. *Pure Python*,
   *Ghostscript*); a leading `~` marks a pre-Convert guess, replaced by the
   actual backend once the file is converted or previewed.
-- Pick the output **Format** (**SVG** or **PPTX**), then click **Convert** to
-  process every queued file in that format, with per-file status.
+- Pick the output **Format** (**SVG**, **PPTX**, or **EMF**), then click
+  **Convert** to process every queued file in that format, with per-file status.
 - Output goes next to each source by default; use **Change…** to pick an
   output folder for the session.
 - The preview always shows the artwork rendered as SVG, even when the selected
-  format is PPTX.
+  format is PPTX or EMF.
 - Conversions run off the UI thread, so the window stays responsive; engine
   defaults (auto backend, dpi 96, 30 s timeout) match the CLI.
 
@@ -92,6 +92,24 @@ eps2svg sheet.ps --format pptx -d out/  # batch into out/
 - Limitations (v1): single page; no text, gradients, clipping, or grouping;
   even-odd fills approximate as nonzero. `--format pptx` requires the
   pure-Python backend.
+
+## Enhanced Metafile export (.emf)
+
+Convert to a Windows Enhanced Metafile — a vector format that pastes into Office
+and other Windows apps as editable shapes.
+
+```bash
+eps2svg logo.eps --format emf           # -> logo.emf
+eps2svg sheet.ps --format emf -d out/   # batch into out/
+```
+
+- Each painted path becomes an EMF path record (fill or stroke), placed at the
+  source's physical size. Curves are flattened to polylines so the file renders
+  in every EMF consumer.
+- Desktop GUI: set the **Format** selector to **EMF** and click **Convert**.
+- Limitations (v1): built from the pure-Python interpreter, so — like PPTX — no
+  text, raster images, gradients, or clipping; Adobe AGM artwork is degraded.
+  `--format emf` requires the pure-Python backend.
 
 ## Backends
 

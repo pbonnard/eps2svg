@@ -44,6 +44,14 @@ class ConvertTaskTests(unittest.TestCase):
             self.assertTrue(out_path.endswith(".pptx"))
             self.assertTrue(Path(out_path).exists())
 
+    def test_converts_fixture_to_emf(self):
+        with tempfile.TemporaryDirectory() as d:
+            row_id, ok, out_path, message = self._run(
+                FIXTURES / "grid_3x3.eps", d, fmt="emf")
+            self.assertTrue(ok, msg=message)
+            self.assertTrue(out_path.endswith(".emf"))
+            self.assertTrue(Path(out_path).exists())
+
     def test_missing_source_reports_error(self):
         with tempfile.TemporaryDirectory() as d:
             row_id, ok, out_path, message = self._run(Path(d) / "nope.eps", d)

@@ -48,8 +48,8 @@ def predict_backend(src, fmt, gs_available) -> tuple[str, bool]:
     Returns (backend_label, predicted). `predicted` is True only when it is a
     genuine guess — the SVG + Ghostscript case, where the real choice (Pure
     Python, or a fall-through to Ghostscript) is only known at convert time."""
-    if fmt == "pptx":
-        return ("Pure Python", False)        # eps2pptx is pure-Python
+    if fmt in ("pptx", "emf"):
+        return ("Pure Python", False)        # eps2pptx / eps2emf are pure-Python
     if not gs_available:
         return ("Pure Python", False)        # only backend that can run
     if _looks_agm(src):

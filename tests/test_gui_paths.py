@@ -39,6 +39,12 @@ class PredictBackendTests(unittest.TestCase):
         self.assertEqual(backend, "Pure Python")
         self.assertFalse(predicted)
 
+    def test_emf_is_always_pure_python_and_certain(self):
+        from eps2svg_gui.paths import predict_backend
+        backend, predicted = predict_backend(Path("x.eps"), "emf", True)
+        self.assertEqual(backend, "Pure Python")
+        self.assertFalse(predicted)
+
     def test_svg_without_ghostscript_is_pure_python_and_certain(self):
         from eps2svg_gui.paths import predict_backend
         backend, predicted = predict_backend(Path("x.eps"), "svg", False)

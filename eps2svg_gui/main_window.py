@@ -108,7 +108,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(out_bar)
         out_bar.addWidget(QLabel("Format:"))
         self.format_combo = QComboBox()
-        self.format_combo.addItems(["SVG", "PPTX"])
+        self.format_combo.addItems(["SVG", "PPTX", "EMF"])
         self.format_combo.setToolTip("Output format for Convert")
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         out_bar.addWidget(self.format_combo)
