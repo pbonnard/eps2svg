@@ -95,31 +95,40 @@ class MainWindowModelTests(unittest.TestCase):
         w.list_widget.setCurrentRow(0)
         self.assertTrue(w.split_btn.isEnabled())
 
-    def test_pptx_button_enabled_only_with_selection(self):
+    def test_format_selector_defaults_to_svg(self):
         from eps2svg_gui.main_window import MainWindow
-        from eps2svg_gui.file_list import FileRow
         w = MainWindow()
-        self.assertFalse(w.pptx_btn.isEnabled())
-        w._append_row(FileRow(src=Path("logo.eps")))
-        w.list_widget.setCurrentRow(0)
-        self.assertTrue(w.pptx_btn.isEnabled())
+        self.assertEqual(w.output_format, "svg")
+        w.format_combo.setCurrentText("PPTX")
+        self.assertEqual(w.output_format, "pptx")
 
     def test_action_toolbar_fits_default_window(self):
         # Regression: the toolbar holding the action buttons must not exceed
-        # the default window width, else the rightmost button (Export PPTX…)
-        # is pushed into the overflow chevron and is invisible.
+        # the default window width, else the rightmost button is pushed into the
+        # overflow chevron and is invisible.
         from eps2svg_gui.main_window import MainWindow
         from PySide6.QtWidgets import QToolBar
         w = MainWindow()
         w.resize(1000, 640)
         action_bar = next(b for b in w.findChildren(QToolBar)
-                          if b.isAncestorOf(w.pptx_btn))
+                          if b.isAncestorOf(w.split_btn))
         self.assertLessEqual(action_bar.sizeHint().width(), w.width())
 
 
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class MainWindowEndToEndTests(unittest.TestCase):
-    def test_add_paths_converts_to_done(self):
+    def _wait_until_done(self, w, app, timeout=8.0):
+        from eps2svg_gui.file_list import RowStatus
+        waited = 0.0
+        while waited < timeout and w.rows[0].status not in (
+            RowStatus.DONE,
+            RowStatus.ERROR,
+        ):
+            app.processEvents()
+            time.sleep(0.02)
+            waited += 0.02
+
+    def test_add_only_queues_then_convert_makes_svg(self):
         from eps2svg_gui.main_window import MainWindow
         from eps2svg_gui.file_list import RowStatus
         app = ensure_qapp()
@@ -127,16 +136,13 @@ class MainWindowEndToEndTests(unittest.TestCase):
             w = MainWindow()
             w.set_output_dir(d)
             w.add_paths([str(FIXTURES / "grid_3x3.eps")])
+            # Adding only queues — nothing is converted yet.
             self.assertEqual(len(w.rows), 1)
-            waited = 0.0
-            while waited < 5.0 and w.rows[0].status not in (
-                RowStatus.DONE,
-                RowStatus.ERROR,
-            ):
-                app.processEvents()
-                time.sleep(0.02)
-                waited += 0.02
+            self.assertEqual(w.rows[0].status, RowStatus.QUEUED)
+            w._convert_all()
+            self._wait_until_done(w, app)
             self.assertEqual(w.rows[0].status, RowStatus.DONE, msg=w.rows[0].message)
+            self.assertTrue(w.rows[0].out_path.endswith(".svg"))
             self.assertTrue(Path(w.rows[0].out_path).exists())
 
     def test_add_paths_filters_unsupported(self):
@@ -148,22 +154,58 @@ class MainWindowEndToEndTests(unittest.TestCase):
             w.add_paths([str(junk)])
             self.assertEqual(len(w.rows), 0)
 
-    def test_export_pptx_updates_status_when_done(self):
+    def test_convert_in_pptx_format_makes_pptx(self):
         from eps2svg_gui.main_window import MainWindow
-        from eps2svg_gui.file_list import FileRow
+        from eps2svg_gui.file_list import RowStatus
         app = ensure_qapp()
         with tempfile.TemporaryDirectory() as d:
             w = MainWindow()
             w.set_output_dir(d)
-            rid = w._append_row(FileRow(src=FIXTURES / "grid_3x3.eps"))
-            w.list_widget.setCurrentRow(rid)
-            w._export_pptx()
+            w.format_combo.setCurrentText("PPTX")
+            w.add_paths([str(FIXTURES / "grid_3x3.eps")])
+            w._convert_all()
+            self._wait_until_done(w, app)
+            self.assertEqual(w.rows[0].status, RowStatus.DONE, msg=w.rows[0].message)
+            self.assertTrue(w.rows[0].out_path.endswith(".pptx"))
+            self.assertTrue((Path(d) / "grid_3x3.pptx").exists())
+
+    def test_switching_format_then_convert_reconverts(self):
+        from eps2svg_gui.main_window import MainWindow
+        from eps2svg_gui.file_list import RowStatus
+        app = ensure_qapp()
+        with tempfile.TemporaryDirectory() as d:
+            w = MainWindow()
+            w.set_output_dir(d)
+            w.add_paths([str(FIXTURES / "grid_3x3.eps")])
+            w._convert_all()                 # SVG
+            self._wait_until_done(w, app)
+            self.assertTrue(w.rows[0].out_path.endswith(".svg"))
+            w.format_combo.setCurrentText("PPTX")
+            w._convert_all()                 # re-convert to PPTX
             waited = 0.0
-            while waited < 8.0 and "exporting" in w.statusBar().currentMessage().lower():
+            while waited < 8.0 and not w.rows[0].out_path.endswith(".pptx"):
                 app.processEvents()
                 time.sleep(0.02)
                 waited += 0.02
-            msg = w.statusBar().currentMessage()
-            self.assertNotIn("exporting", msg.lower(), "status stuck on 'exporting'")
-            self.assertIn("pptx", msg.lower())
-            self.assertTrue((Path(d) / "grid_3x3.pptx").exists())
+            self.assertEqual(w.rows[0].status, RowStatus.DONE, msg=w.rows[0].message)
+            self.assertTrue(w.rows[0].out_path.endswith(".pptx"))
+
+    def test_pptx_row_still_previews_as_svg(self):
+        from eps2svg_gui.main_window import MainWindow
+        app = ensure_qapp()
+        with tempfile.TemporaryDirectory() as d:
+            w = MainWindow()
+            w.set_output_dir(d)
+            w.format_combo.setCurrentText("PPTX")
+            w.add_paths([str(FIXTURES / "grid_3x3.eps")])
+            w._convert_all()
+            self._wait_until_done(w, app)
+            # Output is PPTX, so the preview lazily renders an SVG instead.
+            w._preview_row(0)
+            waited = 0.0
+            while waited < 8.0 and not w.rows[0].preview_svg:
+                app.processEvents()
+                time.sleep(0.02)
+                waited += 0.02
+            self.assertTrue(w.rows[0].preview_svg.endswith(".svg"))
+            self.assertTrue(Path(w.rows[0].preview_svg).exists())

@@ -16,16 +16,18 @@ def is_supported(path) -> bool:
     return Path(path).suffix.lower() in SUPPORTED_EXTS
 
 
-def resolve_output_path(src, output_dir=None) -> Path:
-    """Where the SVG for `src` should be written.
+def resolve_output_path(src, output_dir=None, ext=".svg") -> Path:
+    """Where the output for `src` should be written.
 
-    - output_dir is None  -> next to the source as <stem>.svg
-    - output_dir is set    -> <output_dir>/<stem>.svg
+    - output_dir is None  -> next to the source as <stem><ext>
+    - output_dir is set    -> <output_dir>/<stem><ext>
+
+    `ext` selects the output extension (".svg" by default, ".pptx" for PowerPoint).
     """
     src = Path(src)
     if output_dir is not None:
-        return Path(output_dir) / src.with_suffix(".svg").name
-    return src.with_suffix(".svg")
+        return Path(output_dir) / src.with_suffix(ext).name
+    return src.with_suffix(ext)
 
 
 def enumerate_inputs(paths, recursive: bool = False) -> list[Path]:

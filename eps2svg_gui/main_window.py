@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThreadPool
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -51,6 +53,9 @@ class MainWindow(QMainWindow):
         self.rows: list[FileRow] = []
         self.output_dir: Path | None = None
         self._split_windows: list = []
+        # SVGs rendered solely for the preview pane (PPTX rows and not-yet-
+        # converted rows still preview as artwork) live in this temp dir.
+        self._preview_dir = Path(tempfile.mkdtemp(prefix="eps2svg-preview-"))
 
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(min(4, os.cpu_count() or 1))
@@ -83,11 +88,6 @@ class MainWindow(QMainWindow):
         self.split_btn.clicked.connect(self._open_split)
         bar.addWidget(self.split_btn)
 
-        self.pptx_btn = _icon_button("pptx", "Export PPTX…")
-        self.pptx_btn.setEnabled(False)
-        self.pptx_btn.clicked.connect(self._export_pptx)
-        bar.addWidget(self.pptx_btn)
-
         # Output-destination controls live on a second toolbar row: the output
         # path can be long, so keeping it off the action row prevents the row
         # from overflowing and hiding the rightmost action button.
@@ -95,6 +95,12 @@ class MainWindow(QMainWindow):
         out_bar = QToolBar()
         out_bar.setMovable(False)
         self.addToolBar(out_bar)
+        out_bar.addWidget(QLabel("Format:"))
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["SVG", "PPTX"])
+        self.format_combo.setToolTip("Output format for Convert")
+        out_bar.addWidget(self.format_combo)
+        out_bar.addSeparator()
         out_bar.addWidget(QLabel("Output:"))
         self.output_label = QLabel(_NEXT_TO_SOURCE)
         out_bar.addWidget(self.output_label)
@@ -167,10 +173,19 @@ class MainWindow(QMainWindow):
             str(self.output_dir) if self.output_dir else _NEXT_TO_SOURCE
         )
 
+    @property
+    def output_format(self) -> str:
+        """Selected output format: 'svg' or 'pptx'."""
+        return self.format_combo.currentText().lower()
+
     def add_paths(self, paths) -> None:
+        # Adding only queues; conversion happens on the Convert button, in the
+        # currently-selected format.
+        added = []
         for src in enumerate_inputs(paths, recursive=self.recurse_checkbox.isChecked()):
-            rid = self._append_row(FileRow(src=src))
-            self._submit(rid)
+            added.append(self._append_row(FileRow(src=src)))
+        if added and self.list_widget.currentRow() < 0:
+            self.list_widget.setCurrentRow(added[0])
 
     # ---- row + threading -------------------------------------------------
 
@@ -184,15 +199,22 @@ class MainWindow(QMainWindow):
     def _submit(self, row_id: int) -> None:
         row = self.rows[row_id]
         row.status = RowStatus.CONVERTING
+        row.fmt = self.output_format
         self._refresh_item(row_id)
         out_dir = str(self.output_dir) if self.output_dir else None
-        task = ConvertTask(row_id, row.src, output_dir=out_dir)
+        task = ConvertTask(row_id, row.src, output_dir=out_dir, fmt=row.fmt)
         task.signals.finished.connect(self._on_finished)
         self.pool.start(task)
 
     def _convert_all(self) -> None:
+        # Convert anything not already done in the currently-selected format:
+        # queued/error rows, plus rows previously converted to a different
+        # format (so switching SVG<->PPTX and clicking Convert re-runs them).
+        fmt = self.output_format
         for row_id, row in enumerate(self.rows):
-            if row.status in (RowStatus.QUEUED, RowStatus.ERROR):
+            if row.status == RowStatus.CONVERTING:
+                continue
+            if row.status != RowStatus.DONE or row.fmt != fmt:
                 self._submit(row_id)
 
     def _on_finished(self, row_id: int, ok: bool, out_path: str, message: str) -> None:
@@ -214,16 +236,42 @@ class MainWindow(QMainWindow):
     def _on_selection_changed(self, current_row: int) -> None:
         has_sel = 0 <= current_row < len(self.rows)
         self.split_btn.setEnabled(has_sel)
-        self.pptx_btn.setEnabled(has_sel)
         if has_sel:
             self._preview_row(current_row)
 
     def _preview_row(self, row_id: int) -> None:
         row = self.rows[row_id]
-        if row.status == RowStatus.DONE and row.out_path:
+        # A row converted to SVG already has a displayable SVG on disk.
+        if (row.out_path.lower().endswith(".svg")
+                and Path(row.out_path).exists()):
             self.preview.load(row.out_path)
-        else:
-            self.preview.clear()
+            return
+        # Otherwise (PPTX output, or not yet converted) display a cached SVG
+        # render of the artwork, rendering it lazily on first preview.
+        if row.preview_svg and Path(row.preview_svg).exists():
+            self.preview.load(row.preview_svg)
+            return
+        self.preview.clear()
+        self._render_preview(row_id)
+
+    def _render_preview(self, row_id: int) -> None:
+        row = self.rows[row_id]
+        if not row.src.exists():
+            return
+        # Per-row subdir so two sources with the same stem can't clobber each
+        # other's preview render.
+        pdir = self._preview_dir / str(row_id)
+        pdir.mkdir(exist_ok=True)
+        task = ConvertTask(row_id, row.src, output_dir=str(pdir), fmt="svg")
+        task.signals.finished.connect(self._on_preview_rendered)
+        self.pool.start(task)
+
+    def _on_preview_rendered(self, row_id: int, ok: bool, out_path: str, message: str) -> None:
+        if not ok:
+            return
+        self.rows[row_id].preview_svg = out_path
+        if self.list_widget.currentRow() == row_id:
+            self.preview.load(out_path)
 
     def _open_split(self) -> None:
         row_id = self.list_widget.currentRow()
@@ -233,27 +281,6 @@ class MainWindow(QMainWindow):
         win = SplitWindow(self.rows[row_id].src, output_dir=self.output_dir)
         self._split_windows.append(win)
         win.show()
-
-    def _export_pptx(self) -> None:
-        row_id = self.list_widget.currentRow()
-        if not (0 <= row_id < len(self.rows)):
-            return
-        from eps2svg_gui.paths import resolve_output_path
-        from eps2svg_gui.pptx_worker import PptxExportTask
-        src = self.rows[row_id].src
-        out_dir = str(self.output_dir) if self.output_dir else None
-        dst = resolve_output_path(src, out_dir).with_suffix(".pptx")
-        task = PptxExportTask(src, dst)
-        # Connect to a bound method of this (long-lived) window, not a lambda:
-        # a queued cross-thread connection to a context-less functor is dropped
-        # when QThreadPool auto-deletes the task's signals object after run(),
-        # which would leave the status stuck on "exporting PPTX…".
-        task.signals.finished.connect(self._on_pptx_finished)
-        self.statusBar().showMessage("exporting PPTX…")
-        self.pool.start(task)
-
-    def _on_pptx_finished(self, ok: bool, message: str) -> None:
-        self.statusBar().showMessage(message if ok else f"error: {message}")
 
     def _refresh_item(self, row_id: int) -> None:
         item = self.list_widget.item(row_id)

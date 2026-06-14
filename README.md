@@ -34,10 +34,14 @@ eps2svg-gui              # launch the app (no console window)
 python -m eps2svg_gui
 ```
 
-- Drag-and-drop (or **Add Files…/Add Folder…**) EPS/PS files; drop one to
-  preview it, drop many to batch-convert with per-file status.
+- Drag-and-drop (or **Add Files…/Add Folder…**) EPS/PS files; they are added to
+  the list as *Queued*. Selecting a file previews it.
+- Pick the output **Format** (**SVG** or **PPTX**), then click **Convert** to
+  process every queued file in that format, with per-file status.
 - Output goes next to each source by default; use **Change…** to pick an
   output folder for the session.
+- The preview always shows the artwork rendered as SVG, even when the selected
+  format is PPTX.
 - Conversions run off the UI thread, so the window stays responsive; engine
   defaults (auto backend, dpi 96, 30 s timeout) match the CLI.
 
@@ -78,7 +82,7 @@ eps2svg sheet.ps --format pptx -d out/  # batch into out/
   PowerPoint), placed on a 16:9 slide, scaled to fit and centered.
 - Vector-less files (embedded-JPEG stock art) embed the largest JPEG as a slide
   picture.
-- Desktop GUI: select a file and click **Export PPTX…**.
+- Desktop GUI: set the **Format** selector to **PPTX** and click **Convert**.
 - Limitations (v1): single page; no text, gradients, clipping, or grouping;
   even-odd fills approximate as nonzero. `--format pptx` requires the
   pure-Python backend.

@@ -28,6 +28,11 @@ class FileRow:
     status: RowStatus = RowStatus.QUEUED
     out_path: str = ""
     message: str = ""
+    # Format the row was (or is being) converted as: "svg" | "pptx" | "".
+    fmt: str = ""
+    # Cached temp SVG rendered purely for the preview pane (PPTX rows, or rows
+    # not yet converted, still preview as artwork). "" until rendered.
+    preview_svg: str = ""
 
 
 def row_label(row: FileRow) -> str:

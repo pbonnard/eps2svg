@@ -25,27 +25,41 @@ class WorkerSignals(QObject):
 
 
 class ConvertTask(QRunnable):
-    def __init__(self, row_id: int, src, output_dir=None):
+    def __init__(self, row_id: int, src, output_dir=None, fmt: str = "svg"):
         super().__init__()
         self.row_id = row_id
         self.src = Path(src)
         self.output_dir = output_dir
+        self.fmt = fmt
         self.signals = WorkerSignals()
 
     def run(self) -> None:  # executed on a QThreadPool worker thread
         try:
-            dst = resolve_output_path(self.src, self.output_dir)
-            backend = eps2svg.convert(
-                self.src,
-                dst,
-                dpi=_DPI,
-                strip_bg=True,
-                verbose=False,
-                backend=None,
-                page=None,
-                max_ops=_MAX_OPS,
-                timeout=_TIMEOUT,
-            )
-            self.signals.finished.emit(self.row_id, True, str(dst), backend)
+            if self.fmt == "pptx":
+                message, dst = self._to_pptx()
+            else:
+                message, dst = self._to_svg()
+            self.signals.finished.emit(self.row_id, True, str(dst), message)
         except Exception as exc:  # any engine/runtime failure -> Error row
             self.signals.finished.emit(self.row_id, False, "", str(exc))
+
+    def _to_svg(self):
+        dst = resolve_output_path(self.src, self.output_dir, ext=".svg")
+        backend = eps2svg.convert(
+            self.src,
+            dst,
+            dpi=_DPI,
+            strip_bg=True,
+            verbose=False,
+            backend=None,
+            page=None,
+            max_ops=_MAX_OPS,
+            timeout=_TIMEOUT,
+        )
+        return backend, dst
+
+    def _to_pptx(self):
+        from eps2pptx import convert_eps_to_pptx
+        dst = resolve_output_path(self.src, self.output_dir, ext=".pptx")
+        status = convert_eps_to_pptx(self.src, dst)
+        return status, dst
