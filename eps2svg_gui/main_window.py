@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtCore import QSize, Qt, QThreadPool
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -23,10 +23,22 @@ from PySide6.QtWidgets import (
 
 from eps2svg_gui.convert_worker import ConvertTask
 from eps2svg_gui.file_list import FileRow, RowStatus, row_label
+from eps2svg_gui.icons import icon
 from eps2svg_gui.paths import enumerate_inputs
 from eps2svg_gui.preview import SvgPreview
 
+# Toolbar/utility buttons are icon-only; the label survives as a tooltip.
+_TOOLBAR_ICON_SIZE = QSize(20, 20)
+
 _NEXT_TO_SOURCE = "Next to source"
+
+
+def _icon_button(name: str, tooltip: str) -> QPushButton:
+    """An icon-only button whose former label lives on as a tooltip."""
+    btn = QPushButton(icon(name), "")
+    btn.setToolTip(tooltip)
+    btn.setIconSize(_TOOLBAR_ICON_SIZE)
+    return btn
 
 
 class MainWindow(QMainWindow):
@@ -54,11 +66,11 @@ class MainWindow(QMainWindow):
         bar.setMovable(False)
         self.addToolBar(bar)
 
-        add_files = QPushButton("Add Files…")
+        add_files = _icon_button("add_files", "Add Files…")
         add_files.clicked.connect(self._choose_files)
         bar.addWidget(add_files)
 
-        add_folder = QPushButton("Add Folder…")
+        add_folder = _icon_button("add_folder", "Add Folder…")
         add_folder.clicked.connect(self._choose_folder)
         bar.addWidget(add_folder)
 
@@ -66,12 +78,12 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.recurse_checkbox)
 
         bar.addSeparator()
-        self.split_btn = QPushButton("Split…")
+        self.split_btn = _icon_button("split", "Split…")
         self.split_btn.setEnabled(False)
         self.split_btn.clicked.connect(self._open_split)
         bar.addWidget(self.split_btn)
 
-        self.pptx_btn = QPushButton("Export PPTX…")
+        self.pptx_btn = _icon_button("pptx", "Export PPTX…")
         self.pptx_btn.setEnabled(False)
         self.pptx_btn.clicked.connect(self._export_pptx)
         bar.addWidget(self.pptx_btn)
@@ -86,7 +98,7 @@ class MainWindow(QMainWindow):
         out_bar.addWidget(QLabel("Output:"))
         self.output_label = QLabel(_NEXT_TO_SOURCE)
         out_bar.addWidget(self.output_label)
-        change = QPushButton("Change…")
+        change = _icon_button("folder", "Change output folder…")
         change.clicked.connect(self._choose_output_dir)
         out_bar.addWidget(change)
 
@@ -105,12 +117,14 @@ class MainWindow(QMainWindow):
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
-        fit_btn = QPushButton("Fit")
-        fit_btn.clicked.connect(lambda: self.preview.fit())
-        one_to_one_btn = QPushButton("1:1")
-        one_to_one_btn.clicked.connect(lambda: self.preview.actual_size())
-        controls.addWidget(fit_btn)
-        controls.addWidget(one_to_one_btn)
+        self.fit_btn = _icon_button("fit", "Fit to view")
+        self.fit_btn.setObjectName("fit_btn")
+        self.fit_btn.clicked.connect(lambda: self.preview.fit())
+        self.one_to_one_btn = _icon_button("one_to_one", "Actual size (1:1)")
+        self.one_to_one_btn.setObjectName("one_to_one_btn")
+        self.one_to_one_btn.clicked.connect(lambda: self.preview.actual_size())
+        controls.addWidget(self.fit_btn)
+        controls.addWidget(self.one_to_one_btn)
         controls.addStretch(1)
         right_layout.addLayout(controls)
 
@@ -125,7 +139,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter)
         self.setCentralWidget(container)
 
-        convert_btn = QPushButton("Convert")
+        convert_btn = QPushButton(icon("convert"), "Convert")
         convert_btn.clicked.connect(self._convert_all)
         self.statusBar().addPermanentWidget(convert_btn)
 

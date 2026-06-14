@@ -74,15 +74,17 @@ class MainWindowModelTests(unittest.TestCase):
         self.assertEqual(w.list_widget.item(rid).toolTip(), "")
 
     def test_fit_and_one_to_one_buttons_present_and_clickable(self):
+        # The buttons are now icon-only (label moved to the tooltip), so they
+        # are located by objectName rather than visible text.
         from eps2svg_gui.main_window import MainWindow
-        from PySide6.QtWidgets import QPushButton
         w = MainWindow()
-        buttons = {b.text(): b for b in w.findChildren(QPushButton)}
-        self.assertIn("Fit", buttons)
-        self.assertIn("1:1", buttons)
+        self.assertFalse(w.fit_btn.icon().isNull())
+        self.assertFalse(w.one_to_one_btn.icon().isNull())
+        self.assertEqual(w.fit_btn.text(), "")
+        self.assertEqual(w.one_to_one_btn.text(), "")
         # Clicking with no SVG loaded must not raise.
-        buttons["Fit"].click()
-        buttons["1:1"].click()
+        w.fit_btn.click()
+        w.one_to_one_btn.click()
 
     def test_split_button_enabled_only_with_selection(self):
         from eps2svg_gui.main_window import MainWindow

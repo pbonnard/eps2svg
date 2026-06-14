@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt, QThreadPool
+from PySide6.QtCore import QByteArray, QSize, Qt, QThreadPool
 from PySide6.QtGui import QBrush, QColor, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QGraphicsSvgItem
@@ -28,9 +28,36 @@ from PySide6.QtWidgets import (
 import eps2svg_grid
 from eps2svg_gui.grid_model import GridSpec
 from eps2svg_gui.grid_overlay import GridOverlay
+from eps2svg_gui.icons import icon
 from eps2svg_gui.split_worker import AutoSplitTask, PrepareTask
 
 _DEFAULT_NAME = "{stem}-{index:03d}.svg"
+_TOOLBAR_ICON_SIZE = QSize(20, 20)
+
+
+def _icon_button(name: str, tooltip: str) -> QPushButton:
+    """An icon-only button whose former label lives on as a tooltip."""
+    btn = QPushButton(icon(name), "")
+    btn.setToolTip(tooltip)
+    btn.setIconSize(_TOOLBAR_ICON_SIZE)
+    return btn
+
+
+class _PageView(QGraphicsView):
+    """Page canvas with Ctrl+wheel zoom (plain wheel scrolls).
+
+    Drag mode is left at the default ``NoDrag`` so the grid overlay keeps
+    receiving mouse events for moving/resizing the grid; panning when zoomed in
+    is via the scrollbars.
+    """
+
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier:
+            factor = 1.25 if event.angleDelta().y() > 0 else 0.8
+            self.scale(factor, factor)
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
 
 def _checkerboard(tile: int = 12) -> QPixmap:
@@ -80,7 +107,7 @@ class SplitWindow(QMainWindow):
         self.cols_spin.setValue(5)
         self.cols_spin.valueChanged.connect(self._on_grid_size_changed)
         bar.addWidget(self.cols_spin)
-        auto_grid = QPushButton("Auto-detect grid")
+        auto_grid = _icon_button("auto_detect", "Auto-detect grid")
         auto_grid.clicked.connect(self._on_auto_detect)
         bar.addWidget(auto_grid)
         self.ignore_bg = QCheckBox("Ignore background")
@@ -88,7 +115,7 @@ class SplitWindow(QMainWindow):
         bar.addWidget(self.ignore_bg)
 
         self.scene = QGraphicsScene(self)
-        self.view = QGraphicsView(self.scene)
+        self.view = _PageView(self.scene)
         self.view.setRenderHint(QPainter.Antialiasing)
         self.view.setBackgroundBrush(QBrush(_checkerboard()))
 
@@ -98,7 +125,7 @@ class SplitWindow(QMainWindow):
         self.folder_label = QLabel(str(self._resolve_out_dir()))
         self.folder_label.setWordWrap(True)
         out_layout.addWidget(self.folder_label)
-        change = QPushButton("Change...")
+        change = _icon_button("folder", "Change output folder…")
         change.clicked.connect(self._choose_output_dir)
         out_layout.addWidget(change)
         out_layout.addWidget(QLabel("Name pattern:"))
@@ -109,18 +136,43 @@ class SplitWindow(QMainWindow):
         out_layout.addWidget(self.count_label)
         out_layout.addStretch(1)
 
+        # View + zoom controls row (mirrors the main window's preview controls).
+        view_panel = QWidget()
+        view_layout = QVBoxLayout(view_panel)
+        view_layout.setContentsMargins(0, 0, 0, 0)
+        view_layout.addWidget(self.view, stretch=1)
+
+        zoom_row = QHBoxLayout()
+        zoom_row.setContentsMargins(0, 0, 0, 0)
+        self.fit_btn = _icon_button("fit", "Fit to view")
+        self.fit_btn.setObjectName("fit_btn")
+        self.fit_btn.clicked.connect(self._fit)
+        self.one_to_one_btn = _icon_button("one_to_one", "Actual size (1:1)")
+        self.one_to_one_btn.setObjectName("one_to_one_btn")
+        self.one_to_one_btn.clicked.connect(self._actual_size)
+        zoom_out_btn = _icon_button("zoom_out", "Zoom out")
+        zoom_out_btn.clicked.connect(lambda: self._zoom(0.8))
+        zoom_in_btn = _icon_button("zoom_in", "Zoom in")
+        zoom_in_btn.clicked.connect(lambda: self._zoom(1.25))
+        zoom_row.addWidget(self.fit_btn)
+        zoom_row.addWidget(self.one_to_one_btn)
+        zoom_row.addWidget(zoom_out_btn)
+        zoom_row.addWidget(zoom_in_btn)
+        zoom_row.addStretch(1)
+        view_layout.addLayout(zoom_row)
+
         central = QWidget()
         layout = QHBoxLayout(central)
-        layout.addWidget(self.view, stretch=1)
+        layout.addWidget(view_panel, stretch=1)
         layout.addWidget(out_panel)
         self.setCentralWidget(central)
 
         self.status_label = QLabel("")
         self.statusBar().addWidget(self.status_label)
-        auto_split = QPushButton("Auto-split now")
+        auto_split = _icon_button("scissors", "Auto-split now")
         auto_split.clicked.connect(self._on_auto_split)
         self.statusBar().addPermanentWidget(auto_split)
-        extract = QPushButton("Extract")
+        extract = QPushButton(icon("extract"), "Extract")
         extract.clicked.connect(self._on_extract)
         self.statusBar().addPermanentWidget(extract)
 
@@ -143,11 +195,23 @@ class SplitWindow(QMainWindow):
         self.scene.addItem(self._svg_item)
         self.scene.setSceneRect(0, 0, doc.width, doc.height)
         self._rebuild_overlay((0, 0, doc.width, doc.height))
-        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        self._fit()
         self._set_status("page ready")
 
     def _on_failed(self, message):
         self._set_status(f"error: {message}")
+
+    # ---- zoom ------------------------------------------------------------
+
+    def _fit(self):
+        self.view.resetTransform()
+        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+
+    def _actual_size(self):
+        self.view.resetTransform()
+
+    def _zoom(self, factor):
+        self.view.scale(factor, factor)
 
     # ---- grid editing ----------------------------------------------------
 

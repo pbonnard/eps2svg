@@ -43,6 +43,23 @@ class SplitWindowTests(unittest.TestCase):
             written = list(Path(d).glob("*.svg"))
             self.assertEqual(len(written), 9)
 
+    def test_zoom_controls_present_and_change_transform(self):
+        win = self._prepared_window()
+        # Icon-only buttons (labels live on the tooltip).
+        self.assertFalse(win.fit_btn.icon().isNull())
+        self.assertFalse(win.one_to_one_btn.icon().isNull())
+        self.assertEqual(win.fit_btn.text(), "")
+        self.assertEqual(win.one_to_one_btn.text(), "")
+        # 1:1 resets to identity; zoom scales relative to current.
+        win._actual_size()
+        self.assertAlmostEqual(win.view.transform().m11(), 1.0)
+        win._zoom(1.25)
+        self.assertAlmostEqual(win.view.transform().m11(), 1.25)
+        win._zoom(0.8)
+        self.assertAlmostEqual(win.view.transform().m11(), 1.0)
+        # Fit must not raise.
+        win.fit_btn.click()
+
     def test_auto_detect_seeds_three_by_three(self):
         win = self._prepared_window()
         win._on_auto_detect()
