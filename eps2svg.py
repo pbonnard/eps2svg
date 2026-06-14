@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import os
 import subprocess
 import sys
 import shutil
@@ -110,8 +111,14 @@ def _is_eps_file(src: Path) -> bool:
 def _pure_python(src: Path, dst: Path, dpi: int, verbose: bool,
                  page: int | None = None,
                  max_ops: int = 5_000_000,
-                 timeout: float = 30.0) -> bool:
-    """Pure Python — built-in PostScript subset interpreter."""
+                 timeout: float = 30.0,
+                 stats: dict | None = None,
+                 **_ignored) -> bool:
+    """Pure Python — built-in PostScript subset interpreter.
+
+    When `stats` is given, records `stats["low_fidelity"]` so `convert()` can
+    decide whether to prefer a higher-fidelity backend (see ConversionStatus).
+    """
     try:
         from eps2svg_pure import convert_eps_to_svg
     except ImportError:
@@ -127,6 +134,8 @@ def _pure_python(src: Path, dst: Path, dpi: int, verbose: bool,
         )
         if verbose:
             print(f"  {status}", file=sys.stderr)
+        if stats is not None:
+            stats["low_fidelity"] = bool(getattr(status, "low_fidelity", False))
         return dst.exists() and dst.stat().st_size > 0
     except Exception as e:
         if verbose:
@@ -168,6 +177,7 @@ def _gs_pymupdf(src: Path, dst: Path, dpi: int, verbose: bool,
     is_eps = _is_eps_file(src)
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
         tmp = Path(f.name)
+    doc = None
     try:
         if not _gs_to_pdf(gs, src, tmp, dpi, verbose, page=page, is_eps=is_eps):
             return False
@@ -185,7 +195,18 @@ def _gs_pymupdf(src: Path, dst: Path, dpi: int, verbose: bool,
             print(f"  PyMuPDF error: {e}", file=sys.stderr)
         return False
     finally:
-        tmp.unlink(missing_ok=True)
+        # Close the PyMuPDF handle before deleting the temp PDF — on Windows an
+        # open handle makes unlink() raise WinError 32, which would otherwise
+        # escape and abort the whole conversion. Temp cleanup is best-effort.
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _gs_pdf2svg(src: Path, dst: Path, dpi: int, verbose: bool,
@@ -339,19 +360,63 @@ def convert(
     if not chosen:
         raise ValueError(f"Unknown backend '{backend}'. Options: {[n for n, _ in BACKENDS]}")
 
-    for name, fn in chosen:
-        if verbose:
-            print(f"  Trying backend: {name}", file=sys.stderr)
-        if fn(src, dst, dpi, verbose,
-              page=page, max_ops=max_ops, timeout=timeout):
+    # A backend may render "successfully" yet drop most of the artwork — the
+    # pure-Python interpreter does this on Adobe AGM/CoolType files. Keep such a
+    # render as a fallback and prefer a later, higher-fidelity backend; only fall
+    # back to it if nothing better succeeds (e.g. Ghostscript isn't installed).
+    fallback: Path | None = None
+    fallback_name = ""
+    try:
+        for i, (name, fn) in enumerate(chosen):
+            if verbose:
+                print(f"  Trying backend: {name}", file=sys.stderr)
+            stats: dict = {}
+            if not fn(src, dst, dpi, verbose,
+                      page=page, max_ops=max_ops, timeout=timeout, stats=stats):
+                continue
+            more_remain = i + 1 < len(chosen)
+            if stats.get("low_fidelity") and more_remain:
+                if verbose:
+                    print(f"  {name}: low-fidelity render — trying a "
+                          f"higher-fidelity backend", file=sys.stderr)
+                fallback = _stash(dst)
+                fallback_name = name
+                continue
             if strip_bg:
                 _strip_white_bg(dst, verbose)
             return name
 
-    raise RuntimeError(
-        "Conversion failed — no working backend found.\n"
-        "Run `eps2svg --diagnose` to see what's missing and how to fix it."
-    )
+        if fallback is not None:
+            shutil.copyfile(fallback, dst)
+            if verbose:
+                print("  no higher-fidelity backend available — keeping the "
+                      "pure-Python partial render", file=sys.stderr)
+            if strip_bg:
+                _strip_white_bg(dst, verbose)
+            return f"{fallback_name} (partial — install Ghostscript for full fidelity)"
+
+        raise RuntimeError(
+            "Conversion failed — no working backend found.\n"
+            "Run `eps2svg --diagnose` to see what's missing and how to fix it."
+        )
+    finally:
+        if fallback is not None:
+            fallback.unlink(missing_ok=True)
+
+
+def _stash(path: Path) -> Path:
+    """Move `path` aside to a temp file (same dir) and return it.
+
+    Moving (not copying) is essential: it leaves no file at `path`, so the next
+    backend starts from a clean slate and one that fails to produce a file is
+    correctly detected as a failure (Inkscape, for instance, exits 0 even when
+    it cannot open the input and would otherwise inherit the stale render).
+    """
+    fd, tmp = tempfile.mkstemp(suffix=".svg", dir=str(path.parent))
+    os.close(fd)
+    tmp = Path(tmp)
+    os.replace(path, tmp)
+    return tmp
 
 # ---------------------------------------------------------------------------
 # CLI

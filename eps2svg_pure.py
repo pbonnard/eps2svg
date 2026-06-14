@@ -1602,6 +1602,28 @@ def _detect_is_eps(data: bytes) -> bool:
     return b"EPSF" in head or b"%%BoundingBox" in data[:4096]
 
 
+# When at least this fraction of operator dispatches were unknown (dropped),
+# the render is flagged low-fidelity so the CLI's auto chain can prefer a real
+# PostScript interpreter (Ghostscript). Adobe AGM/CoolType artwork trips this
+# because its drawing operators live in procsets the subset interpreter cannot
+# execute, so most draw calls are dropped. Tuned conservatively: clean files
+# drop ~0% and never trip it.
+_LOW_FIDELITY_DROP_FRACTION = 0.25
+
+
+class ConversionStatus(str):
+    """The human-readable status string, plus structured render-quality signals.
+
+    It is a real ``str`` (so every existing caller keeps working) that also
+    carries ``low_fidelity`` / ``rendered_ops`` / ``dropped_ops`` for callers
+    that want to make backend decisions.
+    """
+
+    low_fidelity: bool = False
+    rendered_ops: int = 0
+    dropped_ops: int = 0
+
+
 def convert_eps_to_svg(
     src: Path,
     dst: Path,
@@ -1777,7 +1799,14 @@ def convert_eps_to_svg(
         import sys
         print(f"  Unknown PS operators ignored: {ops}", file=sys.stderr)
 
-    return status
+    dropped = sum(interp.unknown_ops.values())
+    rendered = rendered_vectors + embedded_images
+    drop_fraction = dropped / (dropped + rendered) if (dropped + rendered) else 0.0
+    result = ConversionStatus(status)
+    result.rendered_ops = rendered
+    result.dropped_ops = dropped
+    result.low_fidelity = bool(budget_hit_reason) or drop_fraction >= _LOW_FIDELITY_DROP_FRACTION
+    return result
 
 
 # Backwards-compatible alias for callers (and clearer intent for PS files)
