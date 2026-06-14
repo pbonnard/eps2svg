@@ -14,14 +14,10 @@ EMU_PER_PT = 12700
 _MARGIN = 0.9  # fraction of the slide the artwork may occupy
 
 
-def convert_eps_to_pptx(src, dst, *, page=None, max_ops=5_000_000,
-                        timeout=30.0, verbose=False) -> str:
-    src = Path(src)
-    dst = Path(dst)
-    from eps2svg_split import _capture_pages
-    interp, bbox = _capture_pages(src, max_ops=max_ops, timeout=timeout,
-                                  verbose=verbose)
-    bx0, by0, bx1, by1 = bbox
+def _placement(bbox_ps):
+    """Uniform fit + center of `bbox_ps` on a 16:9 slide.
+    Returns (ox, oy, aw, ah, s, to_emu) in EMU; `s` is EMU per PS point."""
+    bx0, by0, bx1, by1 = bbox_ps
     w = max(1.0, bx1 - bx0)
     h = max(1.0, by1 - by0)
     fit = min(_MARGIN * package.SLIDE_W / (w * EMU_PER_PT),
@@ -33,12 +29,14 @@ def convert_eps_to_pptx(src, dst, *, page=None, max_ops=5_000_000,
     def to_emu(x, y):
         return (ox + (x - bx0) * s, oy + (by1 - y) * s)
 
-    page_idx = (page - 1) if page else 0
-    pages = [p for p in interp.pages if p] or [[]]
-    if page_idx >= len(pages):
-        page_idx = 0
-    fragments = pages[page_idx]
+    return ox, oy, aw, ah, s, to_emu
 
+
+def _slide_body(fragments, bbox_ps):
+    """Build the <p:spTree> body for one slide: every path fragment becomes an
+    editable shape, uniformly fit and centered for `bbox_ps` on a 16:9 slide.
+    Returns (body_xml, shape_count)."""
+    _ox, _oy, _aw, _ah, s, to_emu = _placement(bbox_ps)
     shapes = []
     shape_id = 2  # id 1 is the group
     for frag in fragments:
@@ -49,15 +47,46 @@ def convert_eps_to_pptx(src, dst, *, page=None, max_ops=5_000_000,
         if xml:
             shapes.append(xml)
             shape_id += 1
+    return "".join(shapes), len(shapes)
 
-    if shapes:
-        package.write_pptx(dst, "".join(shapes))
-        return f"pptx ({len(shapes)} shapes)"
+
+def convert_icons_to_pptx(icons, dst) -> str:
+    """Write a multi-slide deck — one slide per icon.
+
+    `icons` is a list of `(fragments, bbox_ps)`, where `fragments` are the SVG
+    path fragments for that icon and `bbox_ps` its PS-coordinate bounding box."""
+    dst = Path(dst)
+    bodies = [_slide_body(fragments, bbox_ps)[0] for fragments, bbox_ps in icons]
+    if not bodies:
+        package.write_pptx(dst, "")
+        return "pptx (0 slides)"
+    package.write_pptx_multi(dst, bodies)
+    return f"pptx ({len(bodies)} slides)"
+
+
+def convert_eps_to_pptx(src, dst, *, page=None, max_ops=5_000_000,
+                        timeout=30.0, verbose=False) -> str:
+    src = Path(src)
+    dst = Path(dst)
+    from eps2svg_split import _capture_pages
+    interp, bbox = _capture_pages(src, max_ops=max_ops, timeout=timeout,
+                                  verbose=verbose)
+    page_idx = (page - 1) if page else 0
+    pages = [p for p in interp.pages if p] or [[]]
+    if page_idx >= len(pages):
+        page_idx = 0
+    fragments = pages[page_idx]
+
+    body, n_shapes = _slide_body(fragments, bbox)
+    if n_shapes:
+        package.write_pptx(dst, body)
+        return f"pptx ({n_shapes} shapes)"
 
     # Raster fallback: embed the largest JPEG over the placed-art rectangle.
     from eps2svg_pure import strip_eps_binary_header, extract_jpegs
     jpegs = extract_jpegs(strip_eps_binary_header(src.read_bytes()))
     if jpegs:
+        ox, oy, aw, ah, _s, _to_emu = _placement(bbox)
         biggest = max(jpegs, key=len)
         pic = drawingml.picture_xml(off=(ox, oy), ext=(aw, ah),
                                     rid="rId2", pic_id=2)

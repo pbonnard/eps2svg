@@ -57,8 +57,12 @@ def run_split(
     max_ops: int = 5_000_000,
     timeout: float = 30.0,
     grid: bool = False,
+    fmt: str = "svg",
 ) -> SplitResult:
-    """Detect icons in `src` and write one SVG per icon into `out_dir`."""
+    """Detect icons in `src` and write them into `out_dir`.
+
+    `fmt="svg"` writes one SVG per icon; `fmt="pptx"` writes a single
+    `<stem>.pptx` deck with one slide per icon."""
     import sys
 
     out_dir = Path(out_dir)
@@ -104,31 +108,45 @@ def run_split(
         clusters = _lattice_merge(clusters)
 
     if not (min_icons <= len(clusters) <= max_icons):
-        # Fallback: write the unsplit page SVG.
-        bx0, by0, bx1, by1 = bbox
-        width = max(1.0, bx1 - bx0); height = max(1.0, by1 - by0)
-        transform = f"translate({-bx0:.3f},{by1:.3f}) scale(1,-1)"
-        parts = [
-            '<?xml version="1.0" encoding="UTF-8" standalone="no"?>',
-            f'<svg xmlns="http://www.w3.org/2000/svg" '
-            f'viewBox="0 0 {width:.3f} {height:.3f}" '
-            f'width="{width:.3f}pt" height="{height:.3f}pt">',
-            f'<g transform="{transform}">',
-            *page_fragments,
-            "</g></svg>",
-        ]
-        dst = out_dir / f"{src.stem}.svg"
-        dst.write_text("\n".join(parts), encoding="utf-8")
+        # Fallback: the unsplit page as a single icon.
+        if fmt == "pptx":
+            from eps2pptx import convert_icons_to_pptx
+            dst = out_dir / f"{src.stem}.pptx"
+            convert_icons_to_pptx([(page_fragments, bbox)], dst)
+        else:
+            bx0, by0, bx1, by1 = bbox
+            width = max(1.0, bx1 - bx0); height = max(1.0, by1 - by0)
+            transform = f"translate({-bx0:.3f},{by1:.3f}) scale(1,-1)"
+            parts = [
+                '<?xml version="1.0" encoding="UTF-8" standalone="no"?>',
+                f'<svg xmlns="http://www.w3.org/2000/svg" '
+                f'viewBox="0 0 {width:.3f} {height:.3f}" '
+                f'width="{width:.3f}pt" height="{height:.3f}pt">',
+                f'<g transform="{transform}">',
+                *page_fragments,
+                "</g></svg>",
+            ]
+            dst = out_dir / f"{src.stem}.svg"
+            dst.write_text("\n".join(parts), encoding="utf-8")
         if verbose:
             print(f"split: detected {len(clusters)} cluster(s); fallback to "
                   f"unsplit {dst.name}", file=sys.stderr)
         return SplitResult(mode="fallback", icon_count=1, written=[dst])
 
     ordered = _assign_layout(clusters)
-    written: list[Path] = []
+    icons = []  # (seq, row, col, fragments, bbox_ps)
     for seq, (row, col, _orig_idx, shape) in enumerate(ordered, start=1):
         path_fragments = [page_fragments[m.svg_index] for m in shape]
-        b = _shape_bbox(shape)
+        icons.append((seq, row, col, path_fragments, _shape_bbox(shape)))
+
+    if fmt == "pptx":
+        from eps2pptx import convert_icons_to_pptx
+        dst = out_dir / f"{src.stem}.pptx"
+        convert_icons_to_pptx([(frags, b) for _s, _r, _c, frags, b in icons], dst)
+        return SplitResult(mode=mode, icon_count=len(icons), written=[dst])
+
+    written: list[Path] = []
+    for seq, row, col, path_fragments, b in icons:
         svg_text = _emit_icon_svg(path_fragments, b, pad)
         filename = name_pattern.format(
             stem=src.stem, index=seq, row=row + 1, col=col + 1

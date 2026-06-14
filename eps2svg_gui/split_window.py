@@ -10,6 +10,7 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QGraphicsSvgItem
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QGraphicsScene,
     QGraphicsView,
@@ -121,6 +122,13 @@ class SplitWindow(QMainWindow):
 
         out_panel = QWidget()
         out_layout = QVBoxLayout(out_panel)
+        out_layout.addWidget(QLabel("Format:"))
+        self.fmt_combo = QComboBox()
+        self.fmt_combo.addItems(["SVG", "PPTX"])
+        self.fmt_combo.setToolTip("SVG: one file per icon. PPTX: one deck, "
+                                  "one slide per icon.")
+        self.fmt_combo.currentTextChanged.connect(self._on_format_changed)
+        out_layout.addWidget(self.fmt_combo)
         out_layout.addWidget(QLabel("Output folder:"))
         self.folder_label = QLabel(str(self._resolve_out_dir()))
         self.folder_label.setWordWrap(True)
@@ -271,6 +279,15 @@ class SplitWindow(QMainWindow):
             self.output_dir = Path(folder)
             self.folder_label.setText(str(self.output_dir))
 
+    @property
+    def output_format(self) -> str:
+        """Selected output format: 'svg' or 'pptx'."""
+        return self.fmt_combo.currentText().lower()
+
+    def _on_format_changed(self, _text=None):
+        # The per-icon name pattern is meaningless for a single PPTX deck.
+        self.name_edit.setEnabled(self.output_format == "svg")
+
     def _on_extract(self):
         if self.doc is None:
             self._set_status("nothing to extract yet")
@@ -279,23 +296,30 @@ class SplitWindow(QMainWindow):
         cells = self._current_cells()
         pattern = self.name_edit.text() or _DEFAULT_NAME
         ignore = self.ignore_bg.isChecked()
-        try:
-            written = eps2svg_grid.write_grid(
+        fmt = self.output_format
+
+        def _write(force):
+            return eps2svg_grid.write_grid(
                 self.doc, out_dir, cells, name_pattern=pattern,
-                ignore_background=ignore, stem=self.src.stem,
+                ignore_background=ignore, stem=self.src.stem, fmt=fmt, force=force,
             )
+
+        try:
+            written = _write(False)
         except FileExistsError:
             if not self._ask_overwrite(out_dir):
                 self._set_status("cancelled")
                 return
-            written = eps2svg_grid.write_grid(
-                self.doc, out_dir, cells, name_pattern=pattern,
-                ignore_background=ignore, stem=self.src.stem, force=True,
-            )
+            written = _write(True)
         except Exception as exc:
             self._set_status(f"error: {exc}")
             return
-        self._set_status(f"wrote {len(written)} icon(s) to {out_dir}")
+
+        if fmt == "pptx":
+            n = self.doc.content_cell_count(cells, ignore_background=ignore)
+            self._set_status(f"wrote {n}-slide deck to {written[0]}")
+        else:
+            self._set_status(f"wrote {len(written)} icon(s) to {out_dir}")
 
     def _ask_overwrite(self, out_dir) -> bool:
         answer = QMessageBox.question(
@@ -310,7 +334,7 @@ class SplitWindow(QMainWindow):
         # page-spanning shapes (and snaps clusters to a lattice) — intentional:
         # that mode subsumes background filtering for the auto-detect path.
         task = AutoSplitTask(self.src, out_dir, grid=self.ignore_bg.isChecked(),
-                             force=True)
+                             force=True, fmt=self.output_format)
         task.signals.finished.connect(
             lambda ok, msg: self._set_status(msg if ok else f"error: {msg}")
         )

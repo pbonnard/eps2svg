@@ -61,6 +61,21 @@ class ExtractTests(unittest.TestCase):
             self.assertTrue(all(p.exists() for p in written))
             self.assertEqual(written[0].name, "grid-001.svg")
 
+    def test_write_grid_pptx_writes_single_deck(self):
+        import io
+        import zipfile
+        import eps2svg_grid
+        doc = eps2svg_grid.prepare_split(FIXTURES / "grid_3x3.eps")
+        cells = _uniform_cells(0, 0, 300, 300, 3, 3)
+        with tempfile.TemporaryDirectory() as d:
+            written = eps2svg_grid.write_grid(doc, d, cells, stem="grid", fmt="pptx")
+            self.assertEqual(len(written), 1)
+            self.assertEqual(written[0].name, "grid.pptx")
+            zf = zipfile.ZipFile(io.BytesIO(written[0].read_bytes()))
+            slides = [n for n in zf.namelist()
+                      if n.startswith("ppt/slides/slide") and n.endswith(".xml")]
+            self.assertEqual(len(slides), 9)
+
     def test_write_grid_refuses_nonempty_dir_without_force(self):
         import eps2svg_grid
         doc = eps2svg_grid.prepare_split(FIXTURES / "grid_3x3.eps")

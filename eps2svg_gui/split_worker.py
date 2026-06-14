@@ -34,19 +34,20 @@ class AutoSplitSignals(QObject):
 
 
 class AutoSplitTask(QRunnable):
-    def __init__(self, src, out_dir, *, grid=False, force=False):
+    def __init__(self, src, out_dir, *, grid=False, force=False, fmt="svg"):
         super().__init__()
         self.src = Path(src)
         self.out_dir = Path(out_dir)
         self.grid = grid
         self.force = force
+        self.fmt = fmt
         self.signals = AutoSplitSignals()
 
     def run(self) -> None:
         try:
             from eps2svg_split import run_split
             result = run_split(self.src, self.out_dir, grid=self.grid,
-                               force=self.force)
+                               force=self.force, fmt=self.fmt)
             self.signals.finished.emit(
                 True, f"{result.mode}: {result.icon_count} icon(s)"
             )

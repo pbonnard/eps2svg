@@ -55,8 +55,10 @@ Select a file and click **Split…** to open the Split window:
   verify it visually.
 - Or define the grid by hand: set **Rows**/**Cols** and drag the blue frame to
   cover the icons; drag interior gridlines to fix uneven spacing. **Extract**
-  writes one cropped SVG per non-empty cell. **Ignore background** drops
-  page-spanning shapes (borders/backgrounds) before slicing.
+  writes the non-empty cells. **Ignore background** drops page-spanning shapes
+  (borders/backgrounds) before slicing.
+- Pick the **Format**: **SVG** writes one file per icon; **PPTX** writes a
+  single deck with one slide per icon. Applies to both Extract and Auto-split.
 
 Output goes to `<name>-icons/` next to the source (or the chosen output folder).
 

@@ -54,3 +54,17 @@ class AutoSplitTaskTests(unittest.TestCase):
             ok, msg = captured[0]
             self.assertTrue(ok, msg)
             self.assertTrue(any(out.glob("*.svg")))
+
+    def test_auto_split_pptx_writes_deck(self):
+        from eps2svg_gui.split_worker import AutoSplitTask
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "icons"
+            captured = []
+            task = AutoSplitTask(FIXTURES / "grid_3x3.eps", out, force=True,
+                                 fmt="pptx")
+            task.signals.finished.connect(lambda ok, msg: captured.append((ok, msg)))
+            task.run()
+            ok, msg = captured[0]
+            self.assertTrue(ok, msg)
+            self.assertEqual(len(list(out.glob("*.pptx"))), 1)
+            self.assertFalse(any(out.glob("*.svg")))

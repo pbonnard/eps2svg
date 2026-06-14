@@ -37,6 +37,8 @@ class CellResult:
     row: int
     col: int
     svg_text: str
+    fragments: list           # SVG path fragments of the cell's members
+    bbox_ps: tuple            # union bbox in PS coords (for PPTX placement)
 
 
 def _ps_to_svg_bbox(b_ps, bx0, by1):
@@ -87,7 +89,9 @@ class SplitDocument:
                 continue
             fragments = [r.fragment for r in members]
             bbox_ps = _shape_bbox(members)  # members expose .bbox in PS coords
-            out.append(CellResult(row, col, _emit_icon_svg(fragments, bbox_ps, pad)))
+            out.append(CellResult(row, col,
+                                  _emit_icon_svg(fragments, bbox_ps, pad),
+                                  fragments, bbox_ps))
         return out
 
     def content_cell_count(self, cells, *, ignore_background=False) -> int:
@@ -157,7 +161,9 @@ def prepare_split(src, *, page=None, max_ops=5_000_000, timeout=30.0,
 
 def write_grid(doc: SplitDocument, out_dir, cells, *, pad=2.0,
                name_pattern="{stem}-{index:03d}.svg", force=False,
-               ignore_background=False, stem="icons"):
+               ignore_background=False, stem="icons", fmt="svg"):
+    """Write the non-empty cells. `fmt="svg"` writes one SVG per cell;
+    `fmt="pptx"` writes a single `<stem>.pptx` deck, one slide per cell."""
     out_dir = Path(out_dir)
     if out_dir.exists() and any(out_dir.iterdir()) and not force:
         raise FileExistsError(
@@ -165,6 +171,13 @@ def write_grid(doc: SplitDocument, out_dir, cells, *, pad=2.0,
         )
     out_dir.mkdir(parents=True, exist_ok=True)
     results = doc.extract_grid(cells, pad=pad, ignore_background=ignore_background)
+
+    if fmt == "pptx":
+        from eps2pptx import convert_icons_to_pptx
+        dst = out_dir / f"{stem}.pptx"
+        convert_icons_to_pptx([(cr.fragments, cr.bbox_ps) for cr in results], dst)
+        return [dst]
+
     written = []
     for index, cr in enumerate(results, start=1):
         filename = name_pattern.format(

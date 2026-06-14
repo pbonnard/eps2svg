@@ -146,6 +146,92 @@ def build_slide_xml(body: str) -> str:
     return _SLIDE_HEADER + body + _SLIDE_FOOTER
 
 
+_CT_HEADER = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    '<Default Extension="xml" ContentType="application/xml"/>'
+    '<Default Extension="jpeg" ContentType="image/jpeg"/>'
+    '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
+    '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
+    '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
+    '<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>'
+)
+_PRESENTATION_NS = (
+    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+    'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+)
+_PRES_RELS_HEADER = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>'
+)
+
+
+def write_pptx_multi(dst, slide_bodies) -> None:
+    """Write a multi-slide .pptx — one slide per body in `slide_bodies`.
+
+    Each body is the inner <p:spTree> content for that slide. Decks built here
+    are vector-only (no per-slide embedded media); the shared master, layout and
+    theme are reused across all slides. See `write_pptx` for the single-slide
+    (and JPEG-fallback) path."""
+    dst = Path(dst)
+    n = len(slide_bodies)
+
+    content_types = (
+        _CT_HEADER
+        + "".join(
+            f'<Override PartName="/ppt/slides/slide{i}.xml" '
+            f'ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
+            for i in range(1, n + 1)
+        )
+        + "</Types>"
+    )
+    sld_ids = "".join(
+        f'<p:sldId id="{256 + i - 1}" r:id="rId{i + 1}"/>' for i in range(1, n + 1)
+    )
+    presentation = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f"<p:presentation {_PRESENTATION_NS}>"
+        '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>'
+        f"<p:sldIdLst>{sld_ids}</p:sldIdLst>"
+        f'<p:sldSz cx="{SLIDE_W}" cy="{SLIDE_H}" type="screen16x9"/>'
+        '<p:notesSz cx="6858000" cy="9144000"/>'
+        "</p:presentation>"
+    )
+    presentation_rels = (
+        _PRES_RELS_HEADER
+        + "".join(
+            f'<Relationship Id="rId{i + 1}" '
+            f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" '
+            f'Target="slides/slide{i}.xml"/>'
+            for i in range(1, n + 1)
+        )
+        + "</Relationships>"
+    )
+
+    parts = {
+        "[Content_Types].xml": content_types,
+        "_rels/.rels": _ROOT_RELS,
+        "ppt/presentation.xml": presentation,
+        "ppt/_rels/presentation.xml.rels": presentation_rels,
+        "ppt/slideMasters/slideMaster1.xml": _SLIDE_MASTER,
+        "ppt/slideMasters/_rels/slideMaster1.xml.rels": _SLIDE_MASTER_RELS,
+        "ppt/slideLayouts/slideLayout1.xml": _SLIDE_LAYOUT,
+        "ppt/slideLayouts/_rels/slideLayout1.xml.rels": _SLIDE_LAYOUT_RELS,
+        "ppt/theme/theme1.xml": _THEME,
+    }
+    slide_rels = _SLIDE_RELS_HEADER + _SLIDE_RELS_FOOTER  # layout only, no media
+    for i, body in enumerate(slide_bodies, start=1):
+        parts[f"ppt/slides/slide{i}.xml"] = build_slide_xml(body)
+        parts[f"ppt/slides/_rels/slide{i}.xml.rels"] = slide_rels
+
+    with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, text in parts.items():
+            zf.writestr(name, text)
+
+
 def write_pptx(dst, body: str, media_jpeg: bytes | None = None) -> None:
     """Write a .pptx to `dst`. `body` is the inner <p:spTree> content
     (shapes and/or a <p:pic>). `media_jpeg`, if given, is embedded as

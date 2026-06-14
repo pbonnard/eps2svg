@@ -61,6 +61,34 @@ class SplitModuleSurfaceTests(unittest.TestCase):
         self.assertTrue(hasattr(eps2svg_split, "run_split"))
 
 
+class RunSplitFormatTests(unittest.TestCase):
+    def test_svg_writes_one_file_per_icon(self):
+        import tempfile
+        from eps2svg_split import run_split
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            result = run_split(FIXTURES / "grid_3x3.eps", d, force=True)
+            svgs = sorted(d.glob("*.svg"))
+            self.assertEqual(len(svgs), result.icon_count)
+            self.assertGreater(result.icon_count, 1)
+
+    def test_pptx_writes_single_deck_with_one_slide_per_icon(self):
+        import io
+        import tempfile
+        import zipfile
+        from eps2svg_split import run_split
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            result = run_split(FIXTURES / "grid_3x3.eps", d, force=True, fmt="pptx")
+            decks = list(d.glob("*.pptx"))
+            self.assertEqual(len(decks), 1)
+            self.assertEqual(result.written, decks)
+            zf = zipfile.ZipFile(io.BytesIO(decks[0].read_bytes()))
+            slides = [n for n in zf.namelist()
+                      if n.startswith("ppt/slides/slide") and n.endswith(".xml")]
+            self.assertEqual(len(slides), result.icon_count)
+
+
 class Phase3Tests(unittest.TestCase):
     def _capture(self, fixture: str, bbox=(0, 0, 300, 300)):
         from eps2svg_pure import Interpreter, tokenize, _ADOBE_PROLOG

@@ -60,6 +60,31 @@ class SplitWindowTests(unittest.TestCase):
         # Fit must not raise.
         win.fit_btn.click()
 
+    def test_format_selector_defaults_to_svg_and_toggles_name_edit(self):
+        win = self._prepared_window()
+        self.assertEqual(win.output_format, "svg")
+        self.assertTrue(win.name_edit.isEnabled())
+        win.fmt_combo.setCurrentText("PPTX")
+        self.assertEqual(win.output_format, "pptx")
+        self.assertFalse(win.name_edit.isEnabled())
+
+    def test_extract_pptx_writes_single_deck(self):
+        import io
+        import zipfile
+        with tempfile.TemporaryDirectory() as d:
+            win = self._prepared_window(output_dir=d)
+            win.rows_spin.setValue(3)
+            win.cols_spin.setValue(3)
+            win.fmt_combo.setCurrentText("PPTX")
+            win._on_extract()
+            decks = list(Path(d).glob("*.pptx"))
+            self.assertEqual(len(decks), 1)
+            self.assertFalse(list(Path(d).glob("*.svg")))
+            zf = zipfile.ZipFile(io.BytesIO(decks[0].read_bytes()))
+            slides = [n for n in zf.namelist()
+                      if n.startswith("ppt/slides/slide") and n.endswith(".xml")]
+            self.assertEqual(len(slides), 9)
+
     def test_auto_detect_seeds_three_by_three(self):
         win = self._prepared_window()
         win._on_auto_detect()
