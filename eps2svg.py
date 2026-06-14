@@ -70,7 +70,10 @@ def _find_gs() -> str | None:
 def _run(cmd: list[str], verbose: bool = False) -> subprocess.CompletedProcess:
     if verbose:
         print(f"  $ {' '.join(cmd)}", file=sys.stderr)
-    return subprocess.run(cmd, capture_output=True, text=True)
+    # CREATE_NO_WINDOW stops the console build of Ghostscript/pdf2svg from
+    # flashing a console window when invoked from the windowed GUI.
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    return subprocess.run(cmd, capture_output=True, text=True, creationflags=flags)
 
 
 def _gs_to_pdf(gs: str, src: Path, dst: Path, dpi: int, verbose: bool,
