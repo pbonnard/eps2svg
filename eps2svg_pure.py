@@ -102,6 +102,8 @@ class GState:
         "ctm", "fill_color", "stroke_color",
         "line_width", "line_cap", "line_join", "miter_limit",
         "dash_array", "dash_offset",
+        "color_kind", "color_comps",
+        "clip_id",
     )
 
     def __init__(self):
@@ -114,6 +116,13 @@ class GState:
         self.miter_limit = 10.0
         self.dash_array: list[float] = []
         self.dash_offset = 0.0
+        # Current colour space for the generic setcolor operator (PS default is
+        # DeviceGray). setcolorspace updates these; setcolor reads them.
+        self.color_kind = "gray"
+        self.color_comps = 1
+        # Active SVG clipPath id (None = unclipped). In GState so gsave/grestore
+        # scope it automatically.
+        self.clip_id = None
 
     def copy(self) -> "GState":
         g = GState()
@@ -126,6 +135,9 @@ class GState:
         g.miter_limit = self.miter_limit
         g.dash_array = list(self.dash_array)
         g.dash_offset = self.dash_offset
+        g.color_kind = self.color_kind
+        g.color_comps = self.color_comps
+        g.clip_id = self.clip_id
         return g
 
 
@@ -425,6 +437,10 @@ class Interpreter:
         # pages[i] is the list of SVG fragments emitted for page (i+1).
         self.pages: list[list[str]] = [[]]
 
+        # <clipPath> definitions registered by clip/eoclip, emitted in <defs>.
+        self.clip_defs: list[str] = []
+        self._clip_counter = 0
+
         # Per-path metadata captured at emit time for the split feature.
         # Parallels self.pages[-1] entries that are painting ops (fill/stroke).
         self.path_metadata: list[PathMeta] = []
@@ -526,8 +542,8 @@ class Interpreter:
             "setrgbcolor":  self.op_setrgbcolor,
             "setcmykcolor": self.op_setcmykcolor,
             "sethsbcolor":  self.op_sethsbcolor,
-            "setcolor":     self.op_setrgbcolor,
-            "setcolorspace": self.op_pop,    # ignore
+            "setcolor":     self.op_setcolor,
+            "setcolorspace": self.op_setcolorspace,
             "currentgray":  lambda: self.stack.append(0.0),
             "currentrgbcolor": lambda: self.stack.extend(self.gstate.fill_color),
             "currentlinewidth": lambda: self.stack.append(self.gstate.line_width),
@@ -545,8 +561,8 @@ class Interpreter:
             "arcn":      self.op_arcn,
             "arcto":     self.op_arcto,
             "currentpoint": self.op_currentpoint,
-            "clip":      lambda: None,     # no-op
-            "eoclip":    lambda: None,
+            "clip":      self.op_clip,
+            "eoclip":    self.op_eoclip,
             "clippath":  lambda: None,
             "pathbbox":  self.op_pathbbox,
 
@@ -801,37 +817,101 @@ class Interpreter:
             self.gstate.dash_array = []
         self.gstate.dash_offset = offset
 
+    def _set_color(self, rgb):
+        self.gstate.fill_color = rgb
+        self.gstate.stroke_color = rgb
+
     def op_setgray(self):
         g = max(0.0, min(1.0, self._pop_num()))
-        self.gstate.fill_color = (g, g, g)
-        self.gstate.stroke_color = (g, g, g)
+        self.gstate.color_kind, self.gstate.color_comps = "gray", 1
+        self._set_color((g, g, g))
 
     def op_setrgbcolor(self):
         b = max(0.0, min(1.0, self._pop_num()))
         g = max(0.0, min(1.0, self._pop_num()))
         r = max(0.0, min(1.0, self._pop_num()))
-        self.gstate.fill_color = (r, g, b)
-        self.gstate.stroke_color = (r, g, b)
+        self.gstate.color_kind, self.gstate.color_comps = "rgb", 3
+        self._set_color((r, g, b))
 
     def op_setcmykcolor(self):
         k = self._pop_num()
         y = self._pop_num()
         m = self._pop_num()
         c = self._pop_num()
-        r = (1 - c) * (1 - k)
-        g = (1 - m) * (1 - k)
-        b = (1 - y) * (1 - k)
-        self.gstate.fill_color = (r, g, b)
-        self.gstate.stroke_color = (r, g, b)
+        self.gstate.color_kind, self.gstate.color_comps = "cmyk", 4
+        self._set_color(self._cmyk_to_rgb(c, m, y, k))
 
     def op_sethsbcolor(self):
         v = self._pop_num()
         s = self._pop_num()
         h = self._pop_num()
         import colorsys
-        r, g, b = colorsys.hsv_to_rgb(h, s, v)
-        self.gstate.fill_color = (r, g, b)
-        self.gstate.stroke_color = (r, g, b)
+        self.gstate.color_kind, self.gstate.color_comps = "rgb", 3
+        self._set_color(colorsys.hsv_to_rgb(h, s, v))
+
+    @staticmethod
+    def _cmyk_to_rgb(c, m, y, k):
+        def cl(x):
+            return max(0.0, min(1.0, x))
+        c, m, y, k = cl(c), cl(m), cl(y), cl(k)
+        return ((1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k))
+
+    # ---- generic colour space (setcolorspace / setcolor) ----------------
+
+    _CS_FAMILIES = {
+        "DeviceGray": ("gray", 1), "CalGray": ("gray", 1), "G": ("gray", 1),
+        "DeviceRGB": ("rgb", 3), "CalRGB": ("rgb", 3), "Lab": ("rgb", 3),
+        "RGB": ("rgb", 3), "CIEBasedABC": ("rgb", 3), "CIEBasedA": ("gray", 1),
+        "DeviceCMYK": ("cmyk", 4), "CMYK": ("cmyk", 4),
+        "Separation": ("sep", 1),
+        "Indexed": ("other", 1), "I": ("other", 1), "Pattern": ("other", 1),
+    }
+
+    def op_setcolorspace(self):
+        cs = self.stack.pop() if self.stack else None
+        family, extra = cs, None
+        if isinstance(cs, list) and cs:
+            family = cs[0]
+            extra = cs[1] if len(cs) > 1 else None
+        name = family.name if isinstance(family, PSName) else (
+            family if isinstance(family, str) else "")
+        name = name.lstrip("/")
+        if name in self._CS_FAMILIES:
+            self.gstate.color_kind, self.gstate.color_comps = self._CS_FAMILIES[name]
+        elif name == "DeviceN":
+            self.gstate.color_kind = "devicen"
+            self.gstate.color_comps = len(extra) if isinstance(extra, list) else 1
+        elif name == "ICCBased":
+            # The component count lives in the (unparsed) stream's /N — assume RGB.
+            self.gstate.color_kind, self.gstate.color_comps = "rgb", 3
+        else:
+            self.gstate.color_kind, self.gstate.color_comps = "rgb", 3
+
+    def op_setcolor(self):
+        # Pop exactly the colour space's component count (clears pattern operands
+        # too), then convert whatever numeric components we got.
+        n = min(max(0, self.gstate.color_comps), len(self.stack))
+        comps = [self.stack.pop() for _ in range(n)]
+        comps.reverse()
+        nums = [c for c in comps if isinstance(c, (int, float))]
+        rgb = self._comps_to_rgb(self.gstate.color_kind, nums)
+        if rgb is not None:
+            self._set_color(rgb)
+
+    def _comps_to_rgb(self, kind, comps):
+        def cl(x):
+            return max(0.0, min(1.0, x))
+        if kind == "gray" and len(comps) >= 1:
+            g = cl(comps[0]); return (g, g, g)
+        if kind == "rgb" and len(comps) >= 3:
+            return tuple(cl(c) for c in comps[:3])
+        if kind == "cmyk" and len(comps) >= 4:
+            return self._cmyk_to_rgb(*comps[:4])
+        if kind == "sep" and len(comps) >= 1:
+            v = 1.0 - cl(comps[0]); return (v, v, v)        # single spot ink (approx)
+        if kind == "devicen" and comps:
+            v = 1.0 - cl(sum(comps) / len(comps)); return (v, v, v)  # approx
+        return None  # indexed / pattern / insufficient — leave colour unchanged
 
     # Path construction
     def op_newpath(self):
@@ -1010,6 +1090,35 @@ class Interpreter:
         r, g, b = rgb
         return "#{:02x}{:02x}{:02x}".format(int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5))
 
+    # ---- clipping (clip / eoclip) ---------------------------------------
+
+    def _clip_suffix(self) -> str:
+        """The clip-path attribute for the active clip, or '' (with a leading
+        space so it can be concatenated straight into a fragment)."""
+        return f' clip-path="url(#{self.gstate.clip_id})"' if self.gstate.clip_id else ""
+
+    def op_clip(self):
+        self._add_clip(eo=False)
+
+    def op_eoclip(self):
+        self._add_clip(eo=True)
+
+    def _add_clip(self, eo: bool):
+        d = self._path_to_svg_d()
+        if not d:
+            return
+        self._clip_counter += 1
+        cid = f"clip{self._clip_counter}"
+        rule = ' clip-rule="evenodd"' if eo else ""
+        # Intersect with any enclosing clip by chaining the child reference.
+        parent = f' clip-path="url(#{self.gstate.clip_id})"' if self.gstate.clip_id else ""
+        self.clip_defs.append(
+            f'<clipPath id="{cid}" clipPathUnits="userSpaceOnUse">'
+            f'<path d="{d}"{rule}{parent}/></clipPath>'
+        )
+        self.gstate.clip_id = cid
+        # PostScript leaves the path current after clip; do not clear it.
+
     def op_stroke(self):
         d, bbox = self._path_to_svg_d_with_bbox()
         if d:
@@ -1030,7 +1139,7 @@ class Interpreter:
                 attrs.append(f'stroke-linejoin="{["miter","round","bevel"][self.gstate.line_join]}"')
             if self.gstate.dash_array:
                 attrs.append(f'stroke-dasharray="{",".join(f"{x:.3f}" for x in self.gstate.dash_array)}"')
-            self.pages[-1].append("<path " + " ".join(attrs) + "/>")
+            self.pages[-1].append("<path " + " ".join(attrs) + self._clip_suffix() + "/>")
             if bbox is not None:
                 self.path_metadata.append(PathMeta(
                     svg_index=len(self.pages[-1]) - 1,
@@ -1044,7 +1153,7 @@ class Interpreter:
         if d:
             self.pages[-1].append(
                 f'<path d="{d}" fill="{self._color_hex(self.gstate.fill_color)}" '
-                f'fill-rule="nonzero" stroke="none"/>'
+                f'fill-rule="nonzero" stroke="none"{self._clip_suffix()}/>'
             )
             if bbox is not None:
                 self.path_metadata.append(PathMeta(
@@ -1059,7 +1168,7 @@ class Interpreter:
         if d:
             self.pages[-1].append(
                 f'<path d="{d}" fill="{self._color_hex(self.gstate.fill_color)}" '
-                f'fill-rule="evenodd" stroke="none"/>'
+                f'fill-rule="evenodd" stroke="none"{self._clip_suffix()}/>'
             )
             if bbox is not None:
                 self.path_metadata.append(PathMeta(
@@ -1751,6 +1860,11 @@ def convert_eps_to_svg(
         f'viewBox="0 0 {width:.3f} {height:.3f}" '
         f'width="{width:.3f}pt" height="{height:.3f}pt">'
     )
+    if interp.clip_defs:
+        # NOTE: the exported SVG clips correctly in spec-compliant renderers
+        # (browsers, Illustrator, Inkscape), but Qt's QtSvg — used by the GUI
+        # preview — ignores clip-path, so the preview shows the unclipped art.
+        parts.append("<defs>" + "".join(interp.clip_defs) + "</defs>")
     parts.append(f'<g transform="{transform}">')
 
     rendered_vectors = len(selected_page)

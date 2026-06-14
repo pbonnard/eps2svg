@@ -13,6 +13,7 @@ Entry point: run_split(src, out_dir, ...).
 
 from __future__ import annotations
 
+import re
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -123,7 +124,7 @@ def run_split(
                 f'viewBox="0 0 {width:.3f} {height:.3f}" '
                 f'width="{width:.3f}pt" height="{height:.3f}pt">',
                 f'<g transform="{transform}">',
-                *page_fragments,
+                *(strip_clip_attr(f) for f in page_fragments),
                 "</g></svg>",
             ]
             dst = out_dir / f"{src.stem}.svg"
@@ -334,6 +335,19 @@ def _assign_layout(shapes: list[list["PathMeta"]]):
     return enriched
 
 
+_CLIP_ATTR_RE = re.compile(r'\s*clip-path="[^"]*"')
+
+
+def strip_clip_attr(fragment: str) -> str:
+    """Remove any clip-path attribute from a fragment.
+
+    Standalone icon / cropped-page SVGs don't carry the page's <clipPath> defs,
+    and the page-space clip geometry wouldn't map to a cropped icon's coordinate
+    system anyway, so a clip-path reference would be dangling (and could hide the
+    path in strict renderers). Drop it — the path renders unclipped."""
+    return _CLIP_ATTR_RE.sub("", fragment)
+
+
 def _emit_icon_svg(path_fragments: list[str],
                    bbox: tuple[float, float, float, float],
                    pad: float) -> str:
@@ -357,7 +371,7 @@ def _emit_icon_svg(path_fragments: list[str],
         f'width="{w:.3f}pt" height="{h:.3f}pt">'
     )
     parts.append(f'<g transform="translate({tx:.3f},{ty:.3f}) scale(1,-1)">')
-    parts.extend(path_fragments)
+    parts.extend(strip_clip_attr(f) for f in path_fragments)
     parts.append("</g>")
     parts.append("</svg>")
     return "\n".join(parts)

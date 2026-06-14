@@ -16,6 +16,7 @@ from eps2svg_split import (
     _emit_icon_svg,
     _filter_page_spanning,
     _shape_bbox,
+    strip_clip_attr,
 )
 
 
@@ -57,7 +58,7 @@ def _build_page_svg(fragments, bbox) -> str:
         f'viewBox="0 0 {width:.3f} {height:.3f}" '
         f'width="{width:.3f}pt" height="{height:.3f}pt">',
         f'<g transform="{transform}">',
-        *fragments,
+        *(strip_clip_attr(f) for f in fragments),
         "</g>",
         "</svg>",
     ]
