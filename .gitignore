@@ -19,3 +19,7 @@ Thumbs.db
 # Internal docs and agent instructions (not published)
 docs/superpowers/
 CLAUDE.md
+
+# Local PostScript sample / unit-test corpus (kept local, not published)
+samples/
+unit_tests/
