@@ -30,6 +30,33 @@ def resolve_output_path(src, output_dir=None, ext=".svg") -> Path:
     return src.with_suffix(ext)
 
 
+def _looks_agm(src) -> bool:
+    """True if the file's prolog references the Adobe AGM module — artwork the
+    pure-Python interpreter can't fully execute, so the SVG auto-chain falls
+    through to Ghostscript. Cheap header sniff (first 8 KB)."""
+    try:
+        with open(src, "rb") as f:
+            head = f.read(8192)
+    except OSError:
+        return False
+    return b"Adobe_AGM" in head
+
+
+def predict_backend(src, fmt, gs_available) -> tuple[str, bool]:
+    """Best-effort guess of which backend will process `src`.
+
+    Returns (backend_label, predicted). `predicted` is True only when it is a
+    genuine guess — the SVG + Ghostscript case, where the real choice (Pure
+    Python, or a fall-through to Ghostscript) is only known at convert time."""
+    if fmt == "pptx":
+        return ("Pure Python", False)        # eps2pptx is pure-Python
+    if not gs_available:
+        return ("Pure Python", False)        # only backend that can run
+    if _looks_agm(src):
+        return ("Ghostscript", True)
+    return ("Pure Python", True)
+
+
 def enumerate_inputs(paths, recursive: bool = False) -> list[Path]:
     """Expand a list of file/dir paths into concrete supported source files.
 

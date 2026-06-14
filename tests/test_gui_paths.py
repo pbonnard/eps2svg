@@ -27,6 +27,44 @@ class ResolveOutputPathTests(unittest.TestCase):
         self.assertEqual(out, Path("/out/logo.svg"))
 
 
+class PredictBackendTests(unittest.TestCase):
+    def _write(self, d, name, data):
+        p = Path(d) / name
+        p.write_bytes(data)
+        return p
+
+    def test_pptx_is_always_pure_python_and_certain(self):
+        from eps2svg_gui.paths import predict_backend
+        backend, predicted = predict_backend(Path("x.eps"), "pptx", True)
+        self.assertEqual(backend, "Pure Python")
+        self.assertFalse(predicted)
+
+    def test_svg_without_ghostscript_is_pure_python_and_certain(self):
+        from eps2svg_gui.paths import predict_backend
+        backend, predicted = predict_backend(Path("x.eps"), "svg", False)
+        self.assertEqual(backend, "Pure Python")
+        self.assertFalse(predicted)
+
+    def test_svg_with_ghostscript_guesses_ghostscript_for_agm(self):
+        from eps2svg_gui.paths import predict_backend
+        with tempfile.TemporaryDirectory() as d:
+            agm = self._write(d, "ai.eps",
+                              b"%!PS-Adobe-3.1 EPSF-3.0\n%%Creator: Adobe\n"
+                              b"%%BeginResource: procset Adobe_AGM_Core 2.0 0\n")
+            backend, predicted = predict_backend(agm, "svg", True)
+            self.assertEqual(backend, "Ghostscript")
+            self.assertTrue(predicted)
+
+    def test_svg_with_ghostscript_guesses_pure_python_for_plain(self):
+        from eps2svg_gui.paths import predict_backend
+        with tempfile.TemporaryDirectory() as d:
+            plain = self._write(d, "plain.eps",
+                                b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n")
+            backend, predicted = predict_backend(plain, "svg", True)
+            self.assertEqual(backend, "Pure Python")
+            self.assertTrue(predicted)
+
+
 class EnumerateInputsTests(unittest.TestCase):
     def test_keeps_supported_files_and_drops_others(self):
         from eps2svg_gui.paths import enumerate_inputs

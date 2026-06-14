@@ -7,7 +7,9 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThreadPool
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -23,10 +25,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import eps2svg
 from eps2svg_gui.convert_worker import ConvertTask
 from eps2svg_gui.file_list import FileRow, RowStatus, row_label
 from eps2svg_gui.icons import icon
-from eps2svg_gui.paths import enumerate_inputs
+from eps2svg_gui.paths import enumerate_inputs, predict_backend
 from eps2svg_gui.preview import SvgPreview
 
 # Toolbar/utility buttons are icon-only; the label survives as a tooltip.
@@ -53,6 +56,9 @@ class MainWindow(QMainWindow):
         self.rows: list[FileRow] = []
         self.output_dir: Path | None = None
         self._split_windows: list = []
+        self._next_id = 0
+        # Cached once: whether Ghostscript is available (drives backend guesses).
+        self._gs_available = bool(eps2svg._find_gs())
         # SVGs rendered solely for the preview pane (PPTX rows and not-yet-
         # converted rows still preview as artwork) live in this temp dir.
         self._preview_dir = Path(tempfile.mkdtemp(prefix="eps2svg-preview-"))
@@ -79,6 +85,11 @@ class MainWindow(QMainWindow):
         add_folder.clicked.connect(self._choose_folder)
         bar.addWidget(add_folder)
 
+        self.remove_btn = _icon_button("remove", "Remove selected (Del)")
+        self.remove_btn.setEnabled(False)
+        self.remove_btn.clicked.connect(self._remove_selected)
+        bar.addWidget(self.remove_btn)
+
         self.recurse_checkbox = QCheckBox("Recurse")
         bar.addWidget(self.recurse_checkbox)
 
@@ -99,6 +110,7 @@ class MainWindow(QMainWindow):
         self.format_combo = QComboBox()
         self.format_combo.addItems(["SVG", "PPTX"])
         self.format_combo.setToolTip("Output format for Convert")
+        self.format_combo.currentTextChanged.connect(self._on_format_changed)
         out_bar.addWidget(self.format_combo)
         out_bar.addSeparator()
         out_bar.addWidget(QLabel("Output:"))
@@ -112,7 +124,11 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
 
         self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list_widget.currentRowChanged.connect(self._on_selection_changed)
+        del_shortcut = QShortcut(QKeySequence.Delete, self.list_widget)
+        del_shortcut.setContext(Qt.WidgetShortcut)
+        del_shortcut.activated.connect(self._remove_selected)
         splitter.addWidget(self.list_widget)
 
         right = QWidget()
@@ -185,24 +201,54 @@ class MainWindow(QMainWindow):
         for src in enumerate_inputs(paths, recursive=self.recurse_checkbox.isChecked()):
             added.append(self._append_row(FileRow(src=src)))
         if added and self.list_widget.currentRow() < 0:
-            self.list_widget.setCurrentRow(added[0])
+            pos = self._pos(added[0])
+            if pos is not None:
+                self.list_widget.setCurrentRow(pos)
 
     # ---- row + threading -------------------------------------------------
 
     def _append_row(self, row: FileRow) -> int:
-        rid = len(self.rows)
+        row.rid = self._next_id
+        self._next_id += 1
         self.rows.append(row)
-        self.list_widget.addItem(QListWidgetItem(row_label(row)))
+        self._set_predicted(row)
+        item = QListWidgetItem(row_label(row))
+        item.setData(Qt.UserRole, row.rid)
+        self.list_widget.addItem(item)
         self._update_status_bar()
-        return rid
+        return row.rid
 
-    def _submit(self, row_id: int) -> None:
-        row = self.rows[row_id]
+    # ---- id <-> position helpers ----------------------------------------
+
+    def _find_row(self, rid: int) -> FileRow | None:
+        return next((r for r in self.rows if r.rid == rid), None)
+
+    def _pos(self, rid: int) -> int | None:
+        for i, r in enumerate(self.rows):
+            if r.rid == rid:
+                return i
+        return None
+
+    def _current_rid(self) -> int | None:
+        pos = self.list_widget.currentRow()
+        return self.rows[pos].rid if 0 <= pos < len(self.rows) else None
+
+    def _set_predicted(self, row: FileRow) -> None:
+        row.backend, row.backend_predicted = predict_backend(
+            row.src, self.output_format, self._gs_available
+        )
+
+    # ---- threading -------------------------------------------------------
+
+    def _submit(self, rid: int) -> None:
+        row = self._find_row(rid)
+        if row is None:
+            return
         row.status = RowStatus.CONVERTING
         row.fmt = self.output_format
-        self._refresh_item(row_id)
+        self._refresh_item(rid)
         out_dir = str(self.output_dir) if self.output_dir else None
-        task = ConvertTask(row_id, row.src, output_dir=out_dir, fmt=row.fmt)
+        task = ConvertTask(rid, row.src, output_dir=out_dir, fmt=row.fmt)
         task.signals.finished.connect(self._on_finished)
         self.pool.start(task)
 
@@ -211,36 +257,66 @@ class MainWindow(QMainWindow):
         # queued/error rows, plus rows previously converted to a different
         # format (so switching SVG<->PPTX and clicking Convert re-runs them).
         fmt = self.output_format
-        for row_id, row in enumerate(self.rows):
+        for row in list(self.rows):
             if row.status == RowStatus.CONVERTING:
                 continue
             if row.status != RowStatus.DONE or row.fmt != fmt:
-                self._submit(row_id)
+                self._submit(row.rid)
 
-    def _on_finished(self, row_id: int, ok: bool, out_path: str, message: str) -> None:
-        row = self.rows[row_id]
+    def _on_finished(self, rid: int, ok: bool, out_path: str, message: str) -> None:
+        row = self._find_row(rid)
+        if row is None:  # removed while converting
+            return
         if ok:
             row.status = RowStatus.DONE
             row.out_path = out_path
             row.message = message
+            # Actual backend now known (PPTX always renders via pure-Python).
+            row.backend = "Pure Python" if row.fmt == "pptx" else message.split(" (")[0]
+            row.backend_predicted = False
         else:
             row.status = RowStatus.ERROR
             row.message = message
-        self._refresh_item(row_id)
+        self._refresh_item(rid)
         self._update_status_bar()
-        if ok and (self.list_widget.currentRow() == row_id or len(self.rows) == 1):
-            self._preview_row(row_id)
+        if ok and (self._current_rid() == rid or len(self.rows) == 1):
+            self._preview_row(rid)
+
+    # ---- queue editing ---------------------------------------------------
+
+    def _remove_selected(self) -> None:
+        positions = sorted(
+            {i.row() for i in self.list_widget.selectedIndexes()}, reverse=True
+        )
+        for pos in positions:
+            if 0 <= pos < len(self.rows):
+                del self.rows[pos]
+                self.list_widget.takeItem(pos)
+        if not self.rows:
+            self.preview.clear()
+        self._update_status_bar()
+
+    def _on_format_changed(self, _text=None) -> None:
+        # Re-predict rows that haven't successfully converted yet; done rows keep
+        # the actual backend they produced until they are re-converted.
+        for row in self.rows:
+            if row.status in (RowStatus.QUEUED, RowStatus.ERROR):
+                self._set_predicted(row)
+                self._refresh_item(row.rid)
 
     # ---- preview + status ------------------------------------------------
 
     def _on_selection_changed(self, current_row: int) -> None:
         has_sel = 0 <= current_row < len(self.rows)
         self.split_btn.setEnabled(has_sel)
+        self.remove_btn.setEnabled(has_sel)
         if has_sel:
-            self._preview_row(current_row)
+            self._preview_row(self.rows[current_row].rid)
 
-    def _preview_row(self, row_id: int) -> None:
-        row = self.rows[row_id]
+    def _preview_row(self, rid: int) -> None:
+        row = self._find_row(rid)
+        if row is None:
+            return
         # A row converted to SVG already has a displayable SVG on disk.
         if (row.out_path.lower().endswith(".svg")
                 and Path(row.out_path).exists()):
@@ -252,25 +328,34 @@ class MainWindow(QMainWindow):
             self.preview.load(row.preview_svg)
             return
         self.preview.clear()
-        self._render_preview(row_id)
+        self._render_preview(rid)
 
-    def _render_preview(self, row_id: int) -> None:
-        row = self.rows[row_id]
-        if not row.src.exists():
+    def _render_preview(self, rid: int) -> None:
+        row = self._find_row(rid)
+        if row is None or not row.src.exists():
             return
         # Per-row subdir so two sources with the same stem can't clobber each
         # other's preview render.
-        pdir = self._preview_dir / str(row_id)
+        pdir = self._preview_dir / str(rid)
         pdir.mkdir(exist_ok=True)
-        task = ConvertTask(row_id, row.src, output_dir=str(pdir), fmt="svg")
+        task = ConvertTask(rid, row.src, output_dir=str(pdir), fmt="svg")
         task.signals.finished.connect(self._on_preview_rendered)
         self.pool.start(task)
 
-    def _on_preview_rendered(self, row_id: int, ok: bool, out_path: str, message: str) -> None:
+    def _on_preview_rendered(self, rid: int, ok: bool, out_path: str, message: str) -> None:
         if not ok:
             return
-        self.rows[row_id].preview_svg = out_path
-        if self.list_widget.currentRow() == row_id:
+        row = self._find_row(rid)
+        if row is None:
+            return
+        row.preview_svg = out_path
+        # The preview render exercised the real SVG auto-chain — upgrade a
+        # predicted SVG backend to the actual one it selected.
+        if self.output_format == "svg" and row.backend_predicted:
+            row.backend = message.split(" (")[0]
+            row.backend_predicted = False
+            self._refresh_item(rid)
+        if self._current_rid() == rid:
             self.preview.load(out_path)
 
     def _open_split(self) -> None:
@@ -282,9 +367,12 @@ class MainWindow(QMainWindow):
         self._split_windows.append(win)
         win.show()
 
-    def _refresh_item(self, row_id: int) -> None:
-        item = self.list_widget.item(row_id)
-        row = self.rows[row_id]
+    def _refresh_item(self, rid: int) -> None:
+        pos = self._pos(rid)
+        if pos is None:
+            return
+        row = self.rows[pos]
+        item = self.list_widget.item(pos)
         item.setText(row_label(row))
         # Only errors carry a hover message; on success row.message is the
         # backend name, which shouldn't linger as a tooltip (e.g. after a

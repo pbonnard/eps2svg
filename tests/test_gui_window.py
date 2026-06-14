@@ -27,7 +27,11 @@ class MainWindowModelTests(unittest.TestCase):
         w._on_finished(rid, True, "logo.svg", "Pure Python")
         self.assertEqual(w.rows[rid].status, RowStatus.DONE)
         self.assertEqual(w.rows[rid].out_path, "logo.svg")
-        self.assertEqual(w.list_widget.item(rid).text(), "logo.eps    ✓ Done")
+        # Label now also carries the backend (e.g. "… ✓ Done    · Pure Python").
+        self.assertTrue(
+            w.list_widget.item(rid).text().startswith("logo.eps    ✓ Done"),
+            w.list_widget.item(rid).text(),
+        )
 
     def test_on_finished_marks_error(self):
         from eps2svg_gui.main_window import MainWindow
@@ -101,6 +105,64 @@ class MainWindowModelTests(unittest.TestCase):
         self.assertEqual(w.output_format, "svg")
         w.format_combo.setCurrentText("PPTX")
         self.assertEqual(w.output_format, "pptx")
+
+    def test_added_row_shows_predicted_backend(self):
+        from eps2svg_gui.main_window import MainWindow
+        from eps2svg_gui.file_list import FileRow
+        w = MainWindow()
+        rid = w._append_row(FileRow(src=Path("logo.eps")))
+        row = w._find_row(rid)
+        self.assertTrue(row.backend)  # a prediction was set
+        self.assertIn(row.backend, w.list_widget.item(0).text())
+
+    def test_pptx_format_predicts_pure_python(self):
+        from eps2svg_gui.main_window import MainWindow
+        from eps2svg_gui.file_list import FileRow, RowStatus
+        w = MainWindow()
+        w.format_combo.setCurrentText("PPTX")
+        rid = w._append_row(FileRow(src=Path("logo.eps")))
+        row = w._find_row(rid)
+        self.assertEqual(row.backend, "Pure Python")
+        self.assertFalse(row.backend_predicted)
+
+    def test_finish_sets_actual_backend_not_predicted(self):
+        from eps2svg_gui.main_window import MainWindow
+        from eps2svg_gui.file_list import FileRow
+        w = MainWindow()
+        rid = w._append_row(FileRow(src=Path("logo.eps")))
+        w._find_row(rid).fmt = "svg"
+        w._on_finished(rid, True, "logo.svg", "Ghostscript + PyMuPDF")
+        row = w._find_row(rid)
+        self.assertEqual(row.backend, "Ghostscript + PyMuPDF")
+        self.assertFalse(row.backend_predicted)
+
+    def test_format_change_repredicts_queued_rows(self):
+        from eps2svg_gui.main_window import MainWindow
+        from eps2svg_gui.file_list import FileRow
+        w = MainWindow()
+        rid = w._append_row(FileRow(src=Path("logo.eps")))
+        w.format_combo.setCurrentText("PPTX")
+        row = w._find_row(rid)
+        self.assertEqual(row.backend, "Pure Python")
+        self.assertFalse(row.backend_predicted)
+
+    def test_remove_selected_drops_rows_and_keeps_others_addressable(self):
+        from eps2svg_gui.main_window import MainWindow
+        from eps2svg_gui.file_list import FileRow, RowStatus
+        w = MainWindow()
+        rid_a = w._append_row(FileRow(src=Path("a.eps")))
+        rid_b = w._append_row(FileRow(src=Path("b.eps")))
+        rid_c = w._append_row(FileRow(src=Path("c.eps")))
+        # Remove the middle row.
+        w.list_widget.setCurrentRow(1)
+        w._remove_selected()
+        self.assertEqual([r.src.name for r in w.rows], ["a.eps", "c.eps"])
+        self.assertIsNone(w._find_row(rid_b))
+        # A finish for the removed row is ignored, others still update by id.
+        w._on_finished(rid_b, True, "b.svg", "Pure Python")
+        self.assertEqual(len(w.rows), 2)
+        w._on_finished(rid_c, True, "c.svg", "Pure Python")
+        self.assertEqual(w._find_row(rid_c).status, RowStatus.DONE)
 
     def test_action_toolbar_fits_default_window(self):
         # Regression: the toolbar holding the action buttons must not exceed

@@ -35,7 +35,11 @@ python -m eps2svg_gui
 ```
 
 - Drag-and-drop (or **Add Files…/Add Folder…**) EPS/PS files; they are added to
-  the list as *Queued*. Selecting a file previews it.
+  the list as *Queued*. Selecting a file previews it. Remove files with the
+  **Remove** button or the **Delete** key.
+- Each row shows the backend that will process it (e.g. *Pure Python*,
+  *Ghostscript*); a leading `~` marks a pre-Convert guess, replaced by the
+  actual backend once the file is converted or previewed.
 - Pick the output **Format** (**SVG** or **PPTX**), then click **Convert** to
   process every queued file in that format, with per-file status.
 - Output goes next to each source by default; use **Change…** to pick an

@@ -30,6 +30,14 @@ _SVG: dict[str, str] = {
         <path d="M12 12v6"/>
         <path d="M9 15h6"/>
     """,
+    # Trash can — "Remove" selected files from the queue.
+    "remove": """
+        <path d="M4 7h16"/>
+        <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+        <path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/>
+        <path d="M10 11v6"/>
+        <path d="M14 11v6"/>
+    """,
     # Folder with a plus — "Add Folder".
     "add_folder": """
         <path d="M3 7a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>

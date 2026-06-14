@@ -25,3 +25,17 @@ class RowLabelTests(unittest.TestCase):
         label = row_label(row)
         self.assertIn("logo.eps", label)
         self.assertIn("Done", label)
+
+    def test_label_shows_actual_backend_without_marker(self):
+        from eps2svg_gui.file_list import FileRow, RowStatus, row_label
+        row = FileRow(src=Path("logo.eps"), status=RowStatus.DONE,
+                      backend="Ghostscript", backend_predicted=False)
+        label = row_label(row)
+        self.assertIn("Ghostscript", label)
+        self.assertNotIn("~", label)
+
+    def test_label_marks_predicted_backend_with_tilde(self):
+        from eps2svg_gui.file_list import FileRow, RowStatus, row_label
+        row = FileRow(src=Path("logo.eps"), status=RowStatus.QUEUED,
+                      backend="Pure Python", backend_predicted=True)
+        self.assertIn("~Pure Python", row_label(row))
