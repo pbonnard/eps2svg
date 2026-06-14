@@ -34,6 +34,14 @@ class ClipTests(unittest.TestCase):
         self.assertIn("clip-path=", clipped)
         self.assertNotIn("clip-path=", unclipped)
 
+    def test_initclip_resets_the_clip(self):
+        # After initclip, subsequent fills are unclipped again.
+        i = _run(f"{_RECT} clip {_TRI} fill initclip "
+                 f"newpath 1 1 moveto 3 1 lineto 3 3 lineto closepath fill")
+        clipped, after = i.pages[0][0], i.pages[0][1]
+        self.assertIn("clip-path=", clipped)
+        self.assertNotIn("clip-path=", after)
+
     def test_nested_clips_chain_to_parent(self):
         i = _run(f"{_RECT} clip 0 0 moveto 5 0 lineto 5 5 lineto closepath clip "
                  f"{_TRI} fill")

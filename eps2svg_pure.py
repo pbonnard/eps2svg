@@ -588,6 +588,7 @@ class Interpreter:
             "currentpoint": self.op_currentpoint,
             "clip":      self.op_clip,
             "eoclip":    self.op_eoclip,
+            "initclip":  self.op_initclip,
             "clippath":  lambda: None,
             "pathbbox":  self.op_pathbbox,
 
@@ -1209,6 +1210,10 @@ class Interpreter:
 
     def op_eoclip(self):
         self._add_clip(eo=True)
+
+    def op_initclip(self):
+        # Reset to the default clip (the whole page) — i.e. no active clip.
+        self.gstate.clip_id = None
 
     def _add_clip(self, eo: bool):
         d = self._path_to_svg_d()
