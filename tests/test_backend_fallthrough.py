@@ -93,6 +93,69 @@ class FallthroughTests(unittest.TestCase):
         self.assertEqual(calls, [])  # higher-fidelity backend never tried
 
 
+class AgmShortCircuitTests(unittest.TestCase):
+    def setUp(self):
+        self._orig_backends = eps2svg.BACKENDS
+        self._orig_find_gs = eps2svg._find_gs
+
+    def tearDown(self):
+        eps2svg.BACKENDS = self._orig_backends
+        eps2svg._find_gs = self._orig_find_gs
+
+    def _backends(self, calls):
+        def pure(src, dst, *args, **kwargs):
+            calls.append("pure")
+            Path(dst).write_text("<svg/>", encoding="utf-8")
+            stats = kwargs.get("stats")
+            if stats is not None:
+                stats["low_fidelity"] = False
+            return True
+
+        def gs(src, dst, *args, **kwargs):
+            calls.append("gs")
+            Path(dst).write_text('<svg id="gs"/>', encoding="utf-8")
+            return True
+
+        return [("Pure Python", pure), ("Ghostscript + Fake", gs)]
+
+    def _src(self, d, name, data):
+        p = Path(d) / name
+        p.write_bytes(data)
+        return p
+
+    def test_agm_with_gs_skips_pure_python(self):
+        calls = []
+        eps2svg.BACKENDS = self._backends(calls)
+        eps2svg._find_gs = lambda: "gs.exe"
+        with tempfile.TemporaryDirectory() as d:
+            src = self._src(d, "ai.eps",
+                            b"%!PS\n%%BeginResource: procset Adobe_AGM_Core 2.0 0\n")
+            name = eps2svg.convert(src, Path(d) / "o.svg", strip_bg=False)
+            self.assertEqual(name, "Ghostscript + Fake")
+            self.assertEqual(calls, ["gs"])  # pure-Python never ran
+
+    def test_non_agm_keeps_pure_python_first(self):
+        calls = []
+        eps2svg.BACKENDS = self._backends(calls)
+        eps2svg._find_gs = lambda: "gs.exe"
+        with tempfile.TemporaryDirectory() as d:
+            src = self._src(d, "plain.eps",
+                            b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 9 9\n")
+            name = eps2svg.convert(src, Path(d) / "o.svg", strip_bg=False)
+            self.assertEqual(name, "Pure Python")
+            self.assertEqual(calls, ["pure"])  # GS not reached
+
+    def test_agm_without_gs_keeps_pure_python_first(self):
+        calls = []
+        eps2svg.BACKENDS = self._backends(calls)
+        eps2svg._find_gs = lambda: None
+        with tempfile.TemporaryDirectory() as d:
+            src = self._src(d, "ai.eps", b"%!PS Adobe_AGM_Core\n")
+            name = eps2svg.convert(src, Path(d) / "o.svg", strip_bg=False)
+            self.assertEqual(name, "Pure Python")
+            self.assertEqual(calls, ["pure"])
+
+
 def _have_gs_and_fitz():
     if not eps2svg._find_gs():
         return False

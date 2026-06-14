@@ -107,6 +107,17 @@ def _is_eps_file(src: Path) -> bool:
         return src.suffix.lower() in (".eps", ".epsf")
 
 
+def _looks_agm(src: Path) -> bool:
+    """True if the prolog references the Adobe AGM module — artwork the
+    pure-Python interpreter renders poorly, so a real interpreter (Ghostscript)
+    is preferred. Cheap header sniff of the first 8 KB."""
+    try:
+        with open(src, "rb") as f:
+            return b"Adobe_AGM" in f.read(8192)
+    except OSError:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Backends
 # ---------------------------------------------------------------------------
@@ -362,6 +373,15 @@ def convert(
               if backend is None or n.lower().startswith(backend.lower())]
     if not chosen:
         raise ValueError(f"Unknown backend '{backend}'. Options: {[n for n, _ in BACKENDS]}")
+
+    # AGM short-circuit: Adobe AGM artwork renders poorly in pure-Python and
+    # reliably falls through to Ghostscript anyway. In auto mode, when GS is
+    # available and the source looks like AGM, try the real interpreters first
+    # and keep pure-Python only as a last-resort fallback — avoiding a wasted
+    # full pure-Python pass on a large file. (No GS, or non-AGM input, keeps
+    # pure-Python first: the zero-dependency default is unchanged.)
+    if backend is None and _find_gs() and _looks_agm(src):
+        chosen.sort(key=lambda nf: nf[0] == "Pure Python")  # stable: Pure Python last
 
     # A backend may render "successfully" yet drop most of the artwork — the
     # pure-Python interpreter does this on Adobe AGM/CoolType files. Keep such a
