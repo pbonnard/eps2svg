@@ -155,6 +155,16 @@ class PSName:
     def __repr__(self):
         return f"/{self.name}" if self.literal else self.name
 
+    def __eq__(self, other):
+        # Names compare by text regardless of literal/executable attribute
+        # (so `/foo /foo eq` is true and `type` results match `/integertype`).
+        if isinstance(other, PSName):
+            return self.name == other.name
+        return NotImplemented
+
+    def __hash__(self):
+        return hash(self.name)
+
 
 class PSProc:
     __slots__ = ("body",)
@@ -441,6 +451,9 @@ class Interpreter:
         self.clip_defs: list[str] = []
         self._clip_counter = 0
 
+        # Deterministic PRNG state for rand/srand/rrand.
+        self._rand_seed = 1
+
         # Per-path metadata captured at emit time for the split feature.
         # Parallels self.pages[-1] entries that are painting ops (fill/stroke).
         self.path_metadata: list[PathMeta] = []
@@ -506,7 +519,12 @@ class Interpreter:
             "ge": lambda: self._binop(lambda a, b: a >= b),
             "and": lambda: self._binop(lambda a, b: (a & b) if isinstance(a, int) else (a and b)),
             "or":  lambda: self._binop(lambda a, b: (a | b) if isinstance(a, int) else (a or b)),
+            "xor": lambda: self._binop(lambda a, b: (a ^ b) if isinstance(a, int) else (bool(a) != bool(b))),
             "not": lambda: self.stack.append(not self.stack.pop()),
+            "bitshift": self.op_bitshift,
+            "rand":  self.op_rand,
+            "srand": self.op_srand,
+            "rrand": self.op_rrand,
             "true":  lambda: self.stack.append(True),
             "false": lambda: self.stack.append(False),
 
@@ -526,6 +544,13 @@ class Interpreter:
             "readonly":   lambda: None,
             "noaccess":   lambda: None,
             "executeonly": lambda: None,
+            "known":   self.op_known,
+            "type":    self.op_type,
+            "cvx":     self.op_cvx,
+            "cvlit":   self.op_cvlit,
+            "cvs":     self.op_cvs,
+            "xcheck":  lambda: self.stack.append(
+                isinstance(self.stack.pop(), PSProc)),
 
             # Graphics state
             "gsave":    self.op_gsave,
@@ -588,6 +613,8 @@ class Interpreter:
             "itransform":   self.op_itransform,
             "dtransform":   self.op_dtransform,
             "idtransform":  self.op_idtransform,
+            "concatmatrix": self.op_concatmatrix,
+            "invertmatrix": self.op_invertmatrix,
 
             # Control flow
             "if":      self.op_if,
@@ -621,10 +648,21 @@ class Interpreter:
             "stringwidth": self.op_stringwidth,
             "charpath":  self.op_pop,
             "findfont":  lambda: self.stack.append({"FontName": self.stack.pop()}),
+            "definefont": self.op_definefont,
             "scalefont": lambda: self.stack.pop(),  # leaves font on stack
+            "makefont":  lambda: self.stack.pop(),  # pop matrix, leaves font
             "selectfont": lambda: (self.stack.pop(), self.stack.pop()),
             "setfont":   self.op_pop,
             "currentfont": lambda: self.stack.append({}),
+
+            # Output operators — we suppress stdout, so just consume operands
+            # (leaving them on the stack would corrupt following operators).
+            "=":       self.op_pop,
+            "==":      self.op_pop,
+            "=only":   self.op_pop,
+            "print":   self.op_pop,
+            "stack":   lambda: None,   # prints the stack; does not pop
+            "pstack":  lambda: None,
 
             # showpage / EOF
             "showpage":     self.op_showpage,
@@ -674,11 +712,12 @@ class Interpreter:
         a, b, c, d, e, f = self.gstate.ctm
         return a * x + c * y + e, b * x + d * y + f
 
-    def _premul_ctm(self, m: list[float]):
-        # CTM' = m * CTM
-        a, b, c, d, e, f = m
-        a2, b2, c2, d2, e2, f2 = self.gstate.ctm
-        self.gstate.ctm = [
+    @staticmethod
+    def _matmul(m1, m2):
+        """PostScript matrix concatenation: m1 × m2 (both [a b c d e f])."""
+        a, b, c, d, e, f = m1
+        a2, b2, c2, d2, e2, f2 = m2
+        return [
             a * a2 + b * c2,
             a * b2 + b * d2,
             c * a2 + d * c2,
@@ -686,6 +725,10 @@ class Interpreter:
             e * a2 + f * c2 + e2,
             e * b2 + f * d2 + f2,
         ]
+
+    def _premul_ctm(self, m: list[float]):
+        # CTM' = m × CTM
+        self.gstate.ctm = self._matmul(m, self.gstate.ctm)
 
     # -- operator implementations --------------------------------------------
 
@@ -768,6 +811,70 @@ class Interpreter:
     def op_end(self):
         if len(self.dict_stack) > 1:
             self.dict_stack.pop()
+
+    def op_known(self):
+        k = self.stack.pop()
+        d = self.stack.pop()
+        key = k.name if isinstance(k, PSName) else k
+        self.stack.append(isinstance(d, dict) and key in d)
+
+    def op_type(self):
+        obj = self.stack.pop()
+        if isinstance(obj, bool):
+            t = "booleantype"
+        elif isinstance(obj, int):
+            t = "integertype"
+        elif isinstance(obj, float):
+            t = "realtype"
+        elif isinstance(obj, str):
+            t = "stringtype"
+        elif isinstance(obj, PSName):
+            t = "nametype"
+        elif isinstance(obj, (PSProc, list)):
+            t = "arraytype"
+        elif isinstance(obj, dict):
+            t = "dicttype"
+        elif isinstance(obj, PSMark):
+            t = "marktype"
+        else:
+            t = "nulltype"
+        self.stack.append(PSName(t, literal=True))
+
+    def op_cvx(self):
+        obj = self.stack.pop()
+        self.stack.append(PSName(obj.name, literal=False)
+                          if isinstance(obj, PSName) else obj)
+
+    def op_cvlit(self):
+        obj = self.stack.pop()
+        self.stack.append(PSName(obj.name, literal=True)
+                          if isinstance(obj, PSName) else obj)
+
+    def op_cvs(self):
+        self.stack.pop()                 # destination string buffer (ignored)
+        self.stack.append(self._to_ps_string(self.stack.pop()))
+
+    @staticmethod
+    def _to_ps_string(obj) -> str:
+        if isinstance(obj, bool):
+            return "true" if obj else "false"
+        if isinstance(obj, int):
+            return str(obj)
+        if isinstance(obj, float):
+            return str(obj)
+        if isinstance(obj, PSName):
+            return obj.name
+        if isinstance(obj, str):
+            return obj
+        if obj is None:
+            return ""
+        return "--nostringval--"
+
+    def op_definefont(self):
+        font = self.stack.pop()
+        if self.stack:
+            self.stack.pop()             # key
+        self.stack.append(font)
 
     # Graphics state
     def op_gsave(self):
@@ -1285,6 +1392,57 @@ class Interpreter:
         self.stack.append((d * x - c * y) / det)
         self.stack.append((-b * x + a * y) / det)
 
+    def op_concatmatrix(self):
+        # m1 m2 m3 concatmatrix m3   (m3 := m1 × m2)
+        m3 = self.stack.pop()
+        m2 = [float(x) for x in self.stack.pop()]
+        m1 = [float(x) for x in self.stack.pop()]
+        r = self._matmul(m1, m2)
+        if isinstance(m3, list) and len(m3) == 6:
+            m3[:] = r
+            self.stack.append(m3)
+        else:
+            self.stack.append(r)
+
+    def op_invertmatrix(self):
+        # m1 m2 invertmatrix m2   (m2 := inverse of m1)
+        m2 = self.stack.pop()
+        a, b, c, d, e, f = (float(x) for x in self.stack.pop())
+        det = a * d - b * c
+        if det == 0:
+            r = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        else:
+            r = [d / det, -b / det, -c / det, a / det,
+                 (c * f - d * e) / det, (b * e - a * f) / det]
+        if isinstance(m2, list) and len(m2) == 6:
+            m2[:] = r
+            self.stack.append(m2)
+        else:
+            self.stack.append(r)
+
+    def op_bitshift(self):
+        shift = int(self._pop_num())
+        val = int(self._pop_num())
+        if shift >= 0:
+            r = (val << shift) & 0xFFFFFFFF
+        else:
+            r = (val & 0xFFFFFFFF) >> (-shift)
+        if r >= 0x80000000:
+            r -= 0x100000000
+        self.stack.append(r)
+
+    # Deterministic PRNG (PostScript rand/srand/rrand). Algorithm is
+    # implementation-defined; a glibc-style LCG keeps output reproducible.
+    def op_rand(self):
+        self._rand_seed = (self._rand_seed * 1103515245 + 12345) & 0x7FFFFFFF
+        self.stack.append(self._rand_seed)
+
+    def op_srand(self):
+        self._rand_seed = int(self._pop_num()) & 0x7FFFFFFF
+
+    def op_rrand(self):
+        self.stack.append(self._rand_seed)
+
     # Control flow
     def op_if(self):
         proc = self.stack.pop()
@@ -1518,6 +1676,23 @@ class Interpreter:
                     if self.stack: self.stack.pop()
                     arr.reverse()
                     self.stack.append(arr); continue
+                if name == "<<":
+                    self.stack.append(MARK); continue
+                if name == ">>":
+                    items = []
+                    while self.stack and not isinstance(self.stack[-1], PSMark):
+                        items.append(self.stack.pop())
+                    if self.stack: self.stack.pop()
+                    items.reverse()
+                    d = {}
+                    for k in range(0, len(items) - 1, 2):
+                        key = items[k]
+                        key = key.name if isinstance(key, PSName) else key
+                        try:
+                            d[key] = items[k + 1]
+                        except TypeError:
+                            pass  # unhashable key (array/dict) — skip the pair
+                    self.stack.append(d); continue
                 v = self._resolve(name)
                 if v is None:
                     self.unknown_ops[name] = self.unknown_ops.get(name, 0) + 1
