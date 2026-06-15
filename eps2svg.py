@@ -3,11 +3,12 @@
 eps2svg — Convert EPS files to SVG preserving vector quality and transparency.
 
 Backends tried in order:
-  1. Pure Python    (built-in — works on any system, no external tools)
-  2. Inkscape       (best quality on complex files)
-  3. Ghostscript + PyMuPDF
-  4. Ghostscript + pdf2svg
-  5. Ghostscript + Inkscape (two-step)
+  1. Pure Python           (built-in — works on any system, no external tools)
+  2. Rust PS Interpreter   (MIT, real fonts/images/filters — needs psinterp.dll)
+  3. Inkscape              (best quality on complex files)
+  4. Ghostscript + PyMuPDF
+  5. Ghostscript + pdf2svg
+  6. Ghostscript + Inkscape (two-step)
 
 Run `eps2svg --diagnose` to see which backends are available on this machine.
 """
@@ -39,6 +40,14 @@ _INKSCAPE_WIN_PATHS = [
 _GS_WIN_DIRS = [
     r"C:\Program Files\gs",
     r"C:\Program Files (x86)\gs",
+]
+_RUSTPS_DLL_CANDIDATES = [
+    # Development build (built via `cargo build --release` in the repo)
+    r"C:\Users\pbonn\Claude\rust-ps\target\release\deps\psinterp.dll",
+    # Installed / deployed location (future)
+    r"C:\Program Files\rust-ps\psinterp.dll",
+    # Relative to this source tree (bundled)
+    lambda: str(Path(__file__).resolve().parent / "rustps" / "psinterp.dll"),
 ]
 
 
@@ -118,6 +127,22 @@ def _looks_agm(src: Path) -> bool:
         return False
 
 
+def _find_rustps_dll() -> str | None:
+    """Locate the psinterp.dll from the rust-ps PostScript interpreter."""
+    import importlib.util
+    for candidate in _RUSTPS_DLL_CANDIDATES:
+        if callable(candidate):
+            path = candidate()
+        else:
+            path = candidate
+        if Path(path).exists():
+            return path
+    # Also check PATH
+    if exe := shutil.which("psinterp.dll"):
+        return exe
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Backends
 # ---------------------------------------------------------------------------
@@ -155,6 +180,59 @@ def _pure_python(src: Path, dst: Path, dpi: int, verbose: bool,
         if verbose:
             print(f"  pure-python error: {e}", file=sys.stderr)
         return False
+
+
+def _rustps(src: Path, dst: Path, dpi: int, verbose: bool,
+            page: int | None = None, **_ignored) -> bool:
+    """Pure Rust PostScript interpreter (MIT) via psinterp.dll — vector SVG,
+    with real font/image/filter/clip support. Handles AGM artwork natively."""
+    dll_path = _find_rustps_dll()
+    if not dll_path:
+        return False
+    try:
+        import ctypes
+        import os as _os
+        # Add the DLL's directory to the search path so its sibling DLLs resolve.
+        dll_dir = str(Path(dll_path).parent)
+        try:
+            _os.add_dll_directory(dll_dir)   # Windows
+        except AttributeError:
+            pass
+        dll = ctypes.CDLL(dll_path, winmode=0)
+        dll.ps_render_eps_to_svg.argtypes = [
+            ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p,
+        ]
+        dll.ps_render_eps_to_svg.restype = ctypes.c_int
+        dll.ps_last_error.argtypes = [
+            ctypes.c_char_p, ctypes.c_size_t,
+        ]
+        dll.ps_last_error.restype = ctypes.c_size_t
+    except OSError as e:
+        if verbose:
+            print(f"  rust-ps: failed to load {dll_path}: {e}", file=sys.stderr)
+        return False
+
+    raw = src.read_bytes()
+    out = str(dst).encode("utf-8")
+    try:
+        rc = dll.ps_render_eps_to_svg(raw, len(raw), out)
+    except OSError as e:
+        if verbose:
+            print(f"  rust-ps: render raised {e}", file=sys.stderr)
+        return False
+
+    if rc == 0 and dst.exists() and dst.stat().st_size > 0:
+        if verbose:
+            print(f"  rust-ps: rendered {dst.stat().st_size} bytes", file=sys.stderr)
+        return True
+
+    # Render failed — fetch the last error from the DLL.
+    buf = ctypes.create_string_buffer(1024)
+    dll.ps_last_error(buf, 1024)
+    err = buf.value.decode("latin-1", errors="replace")
+    if verbose:
+        print(f"  rust-ps: error ({rc}): {err}", file=sys.stderr)
+    return False
 
 
 def _inkscape(src: Path, dst: Path, dpi: int, verbose: bool,
@@ -278,6 +356,7 @@ def _gs_inkscape(src: Path, dst: Path, dpi: int, verbose: bool,
 
 BACKENDS: list[tuple[str, object]] = [
     ("Pure Python",            _pure_python),
+    ("Rust PS Interpreter",    _rustps),         # MIT, real fonts/images/filters
     ("Inkscape",               _inkscape),
     ("Ghostscript + PyMuPDF",  _gs_pymupdf),
     ("Ghostscript + pdf2svg",  _gs_pdf2svg),
@@ -293,6 +372,7 @@ def diagnose() -> None:
     inkscape = _find_inkscape()
     gs       = _find_gs()
     pdf2svg  = shutil.which("pdf2svg")
+    rustps   = _find_rustps_dll()
     try:
         import fitz as _fitz
         pymupdf_ver = _fitz.version[0]
@@ -310,16 +390,19 @@ def diagnose() -> None:
 
     print("eps2svg backend availability")
     print("-" * 44)
-    print(f"  {tick(pure_ok)}  Pure Python    (built-in subset interpreter)")
-    print(f"  {tick(inkscape)}  Inkscape       {inkscape or '(not found)'}")
-    print(f"  {tick(gs)}  Ghostscript    {gs or '(not found)'}")
-    print(f"  {tick(pymupdf_ver)}  PyMuPDF        {'v' + pymupdf_ver if pymupdf_ver else '(pip install pymupdf)'}")
-    print(f"  {tick(pdf2svg)}  pdf2svg        {pdf2svg or '(not found)'}")
+    print(f"  {tick(pure_ok)}  Pure Python            (built-in subset interpreter)")
+    print(f"  {tick(rustps)}  Rust PS Interpreter    {rustps or '(psinterp.dll not found)'}")
+    print(f"  {tick(inkscape)}  Inkscape               {inkscape or '(not found)'}")
+    print(f"  {tick(gs)}  Ghostscript            {gs or '(not found)'}")
+    print(f"  {tick(pymupdf_ver)}  PyMuPDF                {'v' + pymupdf_ver if pymupdf_ver else '(pip install pymupdf)'}")
+    print(f"  {tick(pdf2svg)}  pdf2svg                {pdf2svg or '(not found)'}")
     print()
 
     ready = []
     if pure_ok:
         ready.append("Pure Python")
+    if rustps:
+        ready.append("Rust PS Interpreter")
     if inkscape:
         ready.append("Inkscape")
     if gs and pymupdf_ver:
@@ -330,11 +413,12 @@ def diagnose() -> None:
         ready.append("Ghostscript + Inkscape")
 
     print(f"Ready backends: {', '.join(ready) if ready else '(none)'}")
-    if not (inkscape or gs):
+    if not (rustps or inkscape or gs):
         print()
         print("Note: pure-Python backend covers most vector EPS and detects")
         print("embedded JPEGs in raster EPS (Getty/iStock). For maximum")
-        print("fidelity on complex files, install Inkscape or Ghostscript.")
+        print("fidelity on complex files, install a Rust PS interpreter DLL,")
+        print("Inkscape, or Ghostscript.")
 
 # ---------------------------------------------------------------------------
 # Post-processing: strip explicit white background rect
@@ -374,13 +458,12 @@ def convert(
     if not chosen:
         raise ValueError(f"Unknown backend '{backend}'. Options: {[n for n, _ in BACKENDS]}")
 
-    # AGM short-circuit: Adobe AGM artwork renders poorly in pure-Python and
-    # reliably falls through to Ghostscript anyway. In auto mode, when GS is
-    # available and the source looks like AGM, try the real interpreters first
-    # and keep pure-Python only as a last-resort fallback — avoiding a wasted
-    # full pure-Python pass on a large file. (No GS, or non-AGM input, keeps
-    # pure-Python first: the zero-dependency default is unchanged.)
-    if backend is None and _find_gs() and _looks_agm(src):
+    # AGM short-circuit: Adobe AGM artwork renders poorly in pure-Python. In auto
+    # mode, when a real interpreter (Ghostscript or the Rust PS DLL) is available
+    # and the source looks like AGM, try the real interpreters first and keep
+    # pure-Python only as a last-resort fallback — avoiding a wasted full
+    # pure-Python pass on a large file.
+    if backend is None and _looks_agm(src) and (_find_gs() or _find_rustps_dll()):
         chosen.sort(key=lambda nf: nf[0] == "Pure Python")  # stable: Pure Python last
 
     # A backend may render "successfully" yet drop most of the artwork — the

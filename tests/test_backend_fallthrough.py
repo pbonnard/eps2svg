@@ -97,10 +97,15 @@ class AgmShortCircuitTests(unittest.TestCase):
     def setUp(self):
         self._orig_backends = eps2svg.BACKENDS
         self._orig_find_gs = eps2svg._find_gs
+        self._orig_find_rustps = eps2svg._find_rustps_dll
+        # No real tools available unless a test explicitly sets them.
+        eps2svg._find_gs = lambda: None
+        eps2svg._find_rustps_dll = lambda: None
 
     def tearDown(self):
         eps2svg.BACKENDS = self._orig_backends
         eps2svg._find_gs = self._orig_find_gs
+        eps2svg._find_rustps_dll = self._orig_find_rustps
 
     def _backends(self, calls):
         def pure(src, dst, *args, **kwargs):
