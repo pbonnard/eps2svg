@@ -7,8 +7,12 @@ from eps2svg_pure import Interpreter, tokenize
 
 
 def _run(src):
+    from eps2svg_pure import _StopException
     interp = Interpreter((0, 0, 100, 100))
-    interp._exec_tokens(tokenize(src))
+    try:
+        interp._exec_tokens(tokenize(src))
+    except _StopException:
+        pass  # stop at top level (no enclosing stopped) is swallowed
     return interp
 
 
@@ -125,6 +129,35 @@ class ConvertTests(unittest.TestCase):
         i = _run("/MyFont << /FontType 1 >> definefont")
         self.assertEqual(len(i.stack), 1)
         self.assertIsInstance(i.stack[-1], dict)
+
+
+class StopAndStoppedTests(unittest.TestCase):
+    def test_stopped_no_error_returns_false(self):
+        self.assertFalse(_run("{ 2 2 add pop } stopped").stack[-1])
+
+    def test_stop_inside_stopped_returns_true(self):
+        # stop inside stopped → stopped catches _StopException, returns true.
+        self.assertTrue(_run("{ stop } stopped").stack[-1])
+
+    def test_exit_inside_stopped_escapes_stopped(self):
+        # exit propagates through stopped (to the enclosing loop).
+        from eps2svg_pure import _ExitException
+        with self.assertRaises(_ExitException):
+            _run("{ exit } stopped")
+
+    def test_stop_without_stopped_is_swallowed(self):
+        # stop at top level (no stopped) — swallowed silently.
+        # Execution stops at the stop; tokens after it are not reached.
+        self.assertEqual(_run("1 stop 2").stack, [1])
+
+    def test_exit_inside_for_loop_terminates_loop(self):
+        # exit terminates the loop; code after the loop executes.
+        self.assertEqual(_run("0 1 1 10 { exit } for 99").stack[-1], 99)
+
+    def test_stop_and_stopped_stack_unwound_correctly(self):
+        # { stop } stopped → true, execution continues after stopped.
+        i = _run("1 { stop } stopped 2")
+        self.assertEqual(i.stack, [1, True, 2])
 
 
 if __name__ == "__main__":

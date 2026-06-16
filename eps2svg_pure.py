@@ -626,7 +626,7 @@ class Interpreter:
             "exit":    self.op_exit,
             "exec":    self.op_exec,
             "stopped": self.op_stopped,
-            "stop":    self.op_exit,
+            "stop":    self.op_stop,
 
             # Arrays / strings — minimal
             "array":   self.op_array,
@@ -1511,6 +1511,9 @@ class Interpreter:
     def op_exit(self):
         raise _ExitException()
 
+    def op_stop(self):
+        raise _StopException()
+
     def op_exec(self):
         obj = self.stack.pop()
         if isinstance(obj, PSProc):
@@ -1526,7 +1529,11 @@ class Interpreter:
                 # exit must propagate to the enclosing loop, and budget
                 # exhaustion must always abort the whole conversion.
                 raise
+            except _StopException:
+                # stop terminates the stopped context — normal, push true.
+                self.stack.append(True)
             except Exception:
+                # Any other error caught by stopped.
                 self.stack.append(True)
         else:
             self.stack.append(False)
@@ -1705,7 +1712,7 @@ class Interpreter:
                 if callable(v):
                     try:
                         v()
-                    except (_ExitException, _BudgetExhausted):
+                    except (_ExitException, _StopException, _BudgetExhausted):
                         raise
                     except Exception:
                         # Swallow per-operator failures to keep going
@@ -1718,6 +1725,15 @@ class Interpreter:
 
 
 class _ExitException(Exception):
+    """Raised by ``exit`` — propagates to the innermost enclosing ``for``/``repeat``/``loop``."""
+    pass
+
+
+class _StopException(Exception):
+    """Raised by ``stop`` — caught by the innermost enclosing ``stopped`` context.
+    At the top level (no ``stopped`` context), swallowed silently — the PS spec
+    says this should call handleerror, but we have no interactive handler; we
+    just move on."""
     pass
 
 
@@ -1969,7 +1985,7 @@ def convert_eps_to_svg(
     prolog_interp.budget = prolog_budget
     try:
         prolog_interp._exec_tokens(tokenize(_ADOBE_PROLOG))
-    except (_ExitException, _BudgetExhausted):
+    except (_ExitException, _StopException, _BudgetExhausted):
         pass
     interp.budget = budget  # restore main budget
 
@@ -1994,6 +2010,8 @@ def convert_eps_to_svg(
         interp._exec_tokens(tokens)
     except _ExitException:
         pass
+    except _StopException:
+        pass  # stop at top level (no enclosing stopped) — move on
     except _BudgetExhausted as e:
         budget_hit_reason = budget_hit_reason or e.reason
         if verbose:
